@@ -1,0 +1,36 @@
+# Binaries
+mcp-server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build outputs
+bin/
+dist/
+build/
+
+# Go artifacts
+*.test
+*.out
+*.coverprofile
+coverage*
+
+# Module/workspace extras
+go.work
+go.work.sum
+
+# Logs and local env
+*.log
+.env
+.env.*
+
+# Editor/OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+
+.vscode/
+.github/*.md
