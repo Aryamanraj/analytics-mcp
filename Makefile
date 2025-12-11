@@ -7,6 +7,8 @@ BINARY ?= mcp-server
 BIN_DIR ?= bin
 PKG := ./...
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
+CHAT_PORT ?= 3000
+MCP_SERVER_URL ?= http://localhost:8080/
 
 .PHONY: help
 help:
@@ -21,6 +23,7 @@ help:
 	@echo "  make build          Build binary to $(BIN_DIR)/$(BINARY)"
 	@echo "  make run            Run server (stdio)"
 	@echo "  make run-http       Run server over HTTP (:8080 by default)"
+	@echo "  make run-chat       Run chat orchestrator (port 3000 by default)"
 	@echo "  make precommit      fmt-check + vet + test + build"
 	@echo "  make commit         Guide an interactive conventional commit"
 	@echo "  make clean          Remove build artifacts and coverage files"
@@ -66,6 +69,10 @@ run:
 .PHONY: run-http
 run-http:
 	$(GO) run . --http :8080
+
+.PHONY: run-chat
+run-chat:
+	$(GO) run ./cmd/chat-orchestrator --port $(CHAT_PORT) --mcp $(MCP_SERVER_URL)
 
 .PHONY: precommit
 precommit:

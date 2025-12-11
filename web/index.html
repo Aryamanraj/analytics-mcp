@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PayRam Chat Orchestrator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #0b1224;
+      --accent: #7dd3fc;
+      --accent-2: #22d3ee;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --chip: #111a31;
+      --shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 20% 20%, rgba(125, 211, 252, 0.08), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(34, 211, 238, 0.07), transparent 35%),
+                  var(--bg);
+      font-family: 'Space Grotesk', 'Helvetica Neue', sans-serif;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+    }
+    .shell {
+      width: min(1100px, 100%);
+      background: linear-gradient(135deg, rgba(17, 24, 39, 0.9), rgba(12, 19, 35, 0.9));
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.5px;
+    }
+    .badge {
+      background: linear-gradient(120deg, var(--accent), var(--accent-2));
+      color: #0b1224;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(34, 211, 238, 0.25);
+    }
+    #tools {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0 0;
+    }
+    .chip {
+      background: var(--chip);
+      color: var(--muted);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    .chat {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      height: 70vh;
+    }
+    #log {
+      padding: 20px 24px 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .bubble {
+      max-width: 80%;
+      padding: 14px 16px;
+      border-radius: 14px;
+      line-height: 1.5;
+      font-size: 15px;
+      white-space: pre-wrap;
+    }
+    .user {
+      align-self: flex-end;
+      background: #1e293b;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .assistant {
+      align-self: flex-start;
+      background: rgba(125, 211, 252, 0.08);
+      border: 1px solid rgba(125, 211, 252, 0.2);
+    }
+    .tool {
+      border-left: 3px solid var(--accent);
+      background: rgba(34, 211, 238, 0.05);
+      color: var(--text);
+    }
+    form {
+      display: flex;
+      gap: 10px;
+      padding: 16px 16px 18px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      background: rgba(12,19,35,0.8);
+      backdrop-filter: blur(8px);
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--text);
+      font-size: 15px;
+    }
+    button {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #0b1224;
+      border: none;
+      border-radius: 12px;
+      padding: 0 18px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(34, 211, 238, 0.25);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 12px 34px rgba(34, 211, 238, 0.35); }
+    button:active { transform: translateY(1px); }
+    .muted { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <h1>PayRam Chat</h1>
+        <div class="muted">Chat-first UI backed by the MCP server and tools.</div>
+        <div id="tools"></div>
+      </div>
+      <div class="badge">MCP-powered</div>
+    </header>
+    <div class="chat">
+      <div id="log"></div>
+      <form id="chat-form">
+        <input id="message" type="text" placeholder="Ask for a PayRam intro or any question..." autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('message');
+    const toolsEl = document.getElementById('tools');
+
+    function addBubble(text, cls) {
+      const div = document.createElement('div');
+      div.className = `bubble ${cls}`;
+      div.textContent = text;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function fetchTools() {
+      try {
+        const res = await fetch('/api/tools');
+        if (!res.ok) return;
+        const data = await res.json();
+        toolsEl.innerHTML = '';
+        data.forEach(t => {
+          const chip = document.createElement('div');
+          chip.className = 'chip';
+          chip.textContent = `${t.name}`;
+          toolsEl.appendChild(chip);
+        });
+      } catch (e) {
+        console.error('tools error', e);
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = input.value.trim();
+      if (!msg) return;
+      addBubble(msg, 'user');
+      input.value = '';
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          addBubble(`Error: ${text}`, 'assistant');
+          return;
+        }
+        const data = await res.json();
+        addBubble(data.reply, 'assistant');
+        if (data.toolResult?.text) {
+          addBubble(`Tool result (\"${data.toolCall?.name}\"):\n${data.toolResult.text}`, 'bubble tool');
+        }
+      } catch (err) {
+        addBubble(`Request failed: ${err}`, 'assistant');
+      }
+    });
+
+    fetchTools();
+    addBubble('Hi! Ask me about PayRam to see a tool call in action.', 'assistant');
+  </script>
+</body>
+</html>

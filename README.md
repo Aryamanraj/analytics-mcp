@@ -39,6 +39,24 @@ Health check: `curl http://localhost:8080/health`
 ## Available tool
 - `payram_intro`: Returns a plain-text overview of PayRam and useful links.
 
+## Chat orchestrator (UI)
+Launch a minimal chat UI that routes tool calls through the MCP server (HTTP mode required):
+
+```sh
+# terminal 1
+make run-http
+
+# terminal 2
+OPENAI_API_KEY=sk-... make run-chat CHAT_PORT=3000 MCP_SERVER_URL=http://localhost:8080/
+```
+
+Then open http://localhost:3000/ and ask for a PayRam intro to see the tool call in action.
+
+Environment:
+- `OPENAI_API_KEY` (required)
+- `OPENAI_MODEL` (default: `gpt-4o-mini`)
+- `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+
 ## Structure
 - `main.go`: wires stdin/stdout loop to the MCP server.
 - `internal/mcp`: server routing, toolbox, and protocol handling.
