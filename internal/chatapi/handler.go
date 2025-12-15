@@ -1,0 +1,283 @@
+package chatapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/payram/payram-analytics-mcp-server/internal/chatserver"
+	"github.com/payram/payram-analytics-mcp-server/internal/protocol"
+	"github.com/sirupsen/logrus"
+)
+
+// Handler serves an OpenAI-compatible chat completions endpoint and resolves tool calls via MCP.
+type Handler struct {
+	openaiKey   string
+	openaiModel string
+	openaiBase  string
+	mcp         *chatserver.MCPClient
+	apiKey      string
+	httpClient  *http.Client
+	logger      *logrus.Entry
+}
+
+// NewHandler constructs a chat API handler.
+func NewHandler(logger *logrus.Entry, apiKey, openaiKey, openaiModel, openaiBase, mcpURL string) *Handler {
+	oc := &http.Client{Timeout: 30 * time.Second}
+	return &Handler{
+		openaiKey:   openaiKey,
+		openaiModel: openaiModel,
+		openaiBase:  strings.TrimRight(openaiBase, "/"),
+		mcp:         chatserver.NewMCPClient(mcpURL),
+		apiKey:      apiKey,
+		httpClient:  oc,
+		logger:      logger,
+	}
+}
+
+func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/v1/chat/completions", h.handleChat)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+}
+
+func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.authorize(r) {
+		h.logger.Warn("unauthorized request")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req ChatCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Warnf("bad request: %v", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Model == "" {
+		req.Model = h.openaiModel
+	}
+	if len(req.Messages) == 0 {
+		http.Error(w, "messages required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Build system prompt and tools from MCP.
+	tools, err := h.mcp.ListTools(ctx)
+	if err != nil {
+		h.logger.Errorf("list tools error: %v", err)
+		http.Error(w, fmt.Sprintf("list tools error: %v", err), http.StatusBadGateway)
+		return
+	}
+	oaTools := convertTools(tools)
+
+	system := OAChatMessage{Role: "system", Content: systemPrompt()}
+	messages := append([]OAChatMessage{system}, req.Messages...)
+
+	firstReq := ChatCompletionRequest{
+		Model:       req.Model,
+		Messages:    messages,
+		Tools:       oaTools,
+		ToolChoice:  "auto",
+		Temperature: req.Temperature,
+	}
+
+	firstResp, err := h.callOpenAI(ctx, firstReq)
+	if err != nil {
+		h.logger.Errorf("openai first call error: %v", err)
+		http.Error(w, fmt.Sprintf("openai error: %v", err), http.StatusBadGateway)
+		return
+	}
+	if len(firstResp.Choices) == 0 {
+		http.Error(w, "no choices", http.StatusBadGateway)
+		return
+	}
+
+	choice := firstResp.Choices[0]
+	if len(choice.Message.ToolCalls) == 0 {
+		writeJSON(w, firstResp, http.StatusOK)
+		return
+	}
+
+	// Execute tool calls via MCP, then ask LLM again with tool results.
+	toolMessages := make([]OAChatMessage, 0, len(choice.Message.ToolCalls))
+	for _, tc := range choice.Message.ToolCalls {
+		args := tc.Function.Arguments
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
+		var raw json.RawMessage = json.RawMessage(args)
+		result, err := h.mcp.CallTool(ctx, tc.Function.Name, mapFromRaw(raw))
+		if err != nil {
+			h.logger.Errorf("tool error for %s: %v", tc.Function.Name, err)
+			http.Error(w, fmt.Sprintf("tool error: %v", err), http.StatusBadGateway)
+			return
+		}
+		rendered := renderContent(result)
+		toolMessages = append(toolMessages, OAChatMessage{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Name:       tc.Function.Name,
+			Content:    rendered,
+		})
+	}
+
+	followMessages := append(messages, OAChatMessage{Role: "assistant", ToolCalls: choice.Message.ToolCalls})
+	followMessages = append(followMessages, toolMessages...)
+
+	secondReq := ChatCompletionRequest{
+		Model:       req.Model,
+		Messages:    followMessages,
+		Temperature: req.Temperature,
+	}
+
+	secondResp, err := h.callOpenAI(ctx, secondReq)
+	if err != nil {
+		h.logger.Errorf("openai second call error: %v", err)
+		http.Error(w, fmt.Sprintf("openai error: %v", err), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, secondResp, http.StatusOK)
+}
+
+func (h *Handler) callOpenAI(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
+	var resp ChatCompletionResponse
+	body, err := json.Marshal(req)
+	if err != nil {
+		return resp, fmt.Errorf("encode openai request: %w", err)
+	}
+	url := h.openaiBase + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return resp, fmt.Errorf("build openai request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+h.openaiKey)
+
+	httpResp, err := h.httpClient.Do(httpReq)
+	if err != nil {
+		return resp, fmt.Errorf("call openai: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(respBody))
+		if len(msg) > 400 {
+			msg = msg[:400] + "..."
+		}
+		return resp, fmt.Errorf("openai status %d: %s", httpResp.StatusCode, msg)
+	}
+
+	if err := json.NewDecoder(bytes.NewReader(respBody)).Decode(&resp); err != nil {
+		return resp, fmt.Errorf("decode openai response: %w", err)
+	}
+	return resp, nil
+}
+
+func (h *Handler) authorize(r *http.Request) bool {
+	if h.apiKey == "" {
+		return true
+	}
+	if v := r.Header.Get("X-MCP-Key"); v != "" {
+		return strings.TrimSpace(v) == h.apiKey
+	}
+	return false
+}
+
+func writeJSON(w http.ResponseWriter, v any, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func systemPrompt() string {
+	return "You are PayRam's assistant for analytics, setup, and debugging. Use MCP tools when they help. Stay focused on PayRam context."
+}
+
+// convert MCP tool descriptors to OpenAI tools schema.
+func convertTools(tools []protocol.ToolDescriptor) []OATool {
+	out := make([]OATool, 0, len(tools))
+	for _, t := range tools {
+		params := map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+		if t.InputSchema != nil {
+			params = toParameterMap(*t.InputSchema)
+		}
+		out = append(out, OATool{
+			Type: "function",
+			Function: OAFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  params,
+			},
+		})
+	}
+	return out
+}
+
+// toParameterMap converts our JSONSchema to a generic map for OpenAI.
+func toParameterMap(s protocol.JSONSchema) map[string]interface{} {
+	// Default to empty object schema.
+	if s.Type == "" {
+		s.Type = "object"
+	}
+	m := map[string]interface{}{"type": s.Type}
+	if len(s.Required) > 0 {
+		m["required"] = s.Required
+	}
+	if s.Description != "" {
+		m["description"] = s.Description
+	}
+	if len(s.Enum) > 0 {
+		m["enum"] = s.Enum
+	}
+	if s.Properties != nil {
+		props := map[string]interface{}{}
+		for k, v := range s.Properties {
+			props[k] = toParameterMap(v)
+		}
+		m["properties"] = props
+	} else if s.Type == "object" {
+		m["properties"] = map[string]interface{}{}
+	}
+	if s.AdditionalProperties != nil {
+		m["additionalProperties"] = s.AdditionalProperties
+	}
+	return m
+}
+
+// renderContent joins call result content parts into a string.
+func renderContent(result protocol.CallResult) string {
+	var sb strings.Builder
+	for i, c := range result.Content {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(c.Text)
+	}
+	return sb.String()
+}
+
+// mapFromRaw attempts to turn raw JSON into a generic map; falls back to empty map on error.
+func mapFromRaw(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return map[string]any{}
+	}
+	return m
+}
