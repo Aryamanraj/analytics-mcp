@@ -38,6 +38,10 @@ func (t *payramIntroTool) Descriptor() protocol.ToolDescriptor {
 	return protocol.ToolDescriptor{
 		Name:        "payram_intro",
 		Description: "Overview of PayRam and helpful links.",
+		InputSchema: &protocol.JSONSchema{
+			Type:       "object",
+			Properties: map[string]protocol.JSONSchema{},
+		},
 	}
 }
 

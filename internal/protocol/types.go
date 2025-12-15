@@ -27,8 +27,19 @@ type ResponseError struct {
 
 // ToolDescriptor describes a tool available from the MCP server.
 type ToolDescriptor struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema *JSONSchema `json:"inputSchema,omitempty"`
+}
+
+// JSONSchema is a minimal subset to describe tool input shapes.
+type JSONSchema struct {
+	Type                 string                `json:"type,omitempty"`
+	Properties           map[string]JSONSchema `json:"properties,omitempty"`
+	Required             []string              `json:"required,omitempty"`
+	Enum                 []string              `json:"enum,omitempty"`
+	Description          string                `json:"description,omitempty"`
+	AdditionalProperties any                   `json:"additionalProperties,omitempty"`
 }
 
 // ListResult is the payload for tools/list.

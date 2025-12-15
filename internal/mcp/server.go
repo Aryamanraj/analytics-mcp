@@ -32,7 +32,9 @@ func (s *Server) Handle(ctx context.Context, req protocol.Request) (protocol.Res
 				"name":    "payram-analytics-mcp-server",
 				"version": "0.1.0",
 			},
-			"capabilities": map[string]any{},
+			"capabilities": map[string]any{
+				"tools": map[string]any{},
+			},
 		}}, nil
 	case "ping":
 		return protocol.Response{JSONRPC: "2.0", ID: normalizeID(req.ID), Result: map[string]any{}}, nil
