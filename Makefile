@@ -9,6 +9,8 @@ PKG := ./...
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 CHAT_PORT ?= 3000
 MCP_SERVER_URL ?= http://localhost:8080/
+CHAT_API_PORT ?= 4000
+OPENAI_MODEL ?= gpt-4o-mini
 
 .PHONY: help
 help:
@@ -24,6 +26,7 @@ help:
 	@echo "  make run            Run server (stdio)"
 	@echo "  make run-http       Run server over HTTP (:8080 by default)"
 	@echo "  make run-chat       Run chat orchestrator (port 3000 by default)"
+	@echo "  make run-chat-api   Run OpenAI-compatible chat API (port 4000 by default)"
 	@echo "  make precommit      fmt-check + vet + test + build"
 	@echo "  make commit         Guide an interactive conventional commit"
 	@echo "  make clean          Remove build artifacts and coverage files"
@@ -73,6 +76,10 @@ run-http:
 .PHONY: run-chat
 run-chat:
 	$(GO) run ./cmd/chat-orchestrator --port $(CHAT_PORT) --mcp $(MCP_SERVER_URL)
+
+.PHONY: run-chat-api
+run-chat-api:
+	$(GO) run ./cmd/chat-api --port $(CHAT_API_PORT) --mcp $(MCP_SERVER_URL) --openai-model $(OPENAI_MODEL)
 
 .PHONY: precommit
 precommit:
