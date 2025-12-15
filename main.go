@@ -33,6 +33,7 @@ func run(httpAddr string) error {
 	tb := mcp.NewToolbox(
 		tools.PayramIntro(),
 		tools.PayramAnalytics(),
+		tools.PayramDocs(),
 	)
 	server := mcp.NewServer(tb)
 
