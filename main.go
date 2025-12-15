@@ -30,7 +30,10 @@ func main() {
 
 func run(httpAddr string) error {
 	ctx := context.Background()
-	tb := mcp.NewToolbox(tools.PayramIntro())
+	tb := mcp.NewToolbox(
+		tools.PayramIntro(),
+		tools.PayramAnalytics(),
+	)
 	server := mcp.NewServer(tb)
 
 	if httpAddr != "" {

@@ -38,6 +38,10 @@ Health check: `curl http://localhost:8080/health`
 
 ## Available tool
 - `payram_intro`: Returns a plain-text overview of PayRam and useful links.
+- `payram_analytics`: Calls PayRam analytics APIs. Actions:
+	- `list_groups`: GET analytics groups (requires `PAYRAM_ANALYTICS_TOKEN`, optional `PAYRAM_ANALYTICS_BASE_URL` default `https://testnet.resuefas.vip:8443`).
+	- `graph_data`: POST group/graph data. Args: `group_id` (int), `graph_id` (int), `payload` (object, optional; defaults to `{ "analytics_date_filter": "last_30_days" }`).
+		Example payloads: filters like `group_by_network_currency_filter`, `in_query_currency_filter`, etc., as provided by the API.
 
 ## Chat orchestrator (UI)
 Launch a minimal chat UI that routes tool calls through the MCP server (HTTP mode required):
@@ -56,6 +60,33 @@ Environment:
 - `OPENAI_API_KEY` (required)
 - `OPENAI_MODEL` (default: `gpt-4o-mini`)
 - `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+
+## OpenAI-compatible chat API
+Expose `/v1/chat/completions` that routes tool calls to the MCP server, with a PayRam system prompt.
+
+```sh
+# terminal 1: MCP HTTP
+make run-http
+
+# terminal 2: Chat API
+CHAT_API_KEY=secret OPENAI_API_KEY=sk-... make run-chat-api CHAT_API_PORT=4000 MCP_SERVER_URL=http://localhost:8080/
+```
+
+Call example:
+```sh
+curl -X POST http://localhost:4000/v1/chat/completions \
+	-H "Authorization: Bearer secret" \
+	-H "Content-Type: application/json" \
+	-d '{
+		"model": "gpt-4o-mini",
+		"messages": [{"role":"user","content":"List analytics groups"}]
+	}'
+```
+
+Configuration (.env or env vars):
+- `CHAT_API_KEY` (required for auth)
+- `OPENAI_API_KEY` (required), `OPENAI_MODEL` (default `gpt-4o-mini`), `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
+- `MCP_SERVER_URL` (HTTP endpoint for MCP server; default `http://localhost:8080/`)
 
 ## Structure
 - `main.go`: wires stdin/stdout loop to the MCP server.
