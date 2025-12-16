@@ -91,7 +91,7 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 		Messages:    messages,
 		Tools:       oaTools,
 		ToolChoice:  "auto",
-		Temperature: req.Temperature,
+		Temperature: sanitizeTemperature(req.Model, req.Temperature),
 	}
 
 	firstResp, err := h.callOpenAI(ctx, firstReq)
@@ -112,6 +112,7 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Execute tool calls via MCP, then ask LLM again with tool results.
+	authToken := bearerToken(r.Header.Get("Authorization"))
 	toolMessages := make([]OAChatMessage, 0, len(choice.Message.ToolCalls))
 	for _, tc := range choice.Message.ToolCalls {
 		args := tc.Function.Arguments
@@ -119,7 +120,9 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 			args = "{}"
 		}
 		var raw json.RawMessage = json.RawMessage(args)
-		result, err := h.mcp.CallTool(ctx, tc.Function.Name, mapFromRaw(raw))
+		callArgs := mapFromRaw(raw)
+		injectAuthToken(tc.Function.Name, authToken, callArgs)
+		result, err := h.mcp.CallTool(ctx, tc.Function.Name, callArgs)
 		if err != nil {
 			h.logger.Errorf("tool error for %s: %v", tc.Function.Name, err)
 			http.Error(w, fmt.Sprintf("tool error: %v", err), http.StatusBadGateway)
@@ -140,7 +143,7 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	secondReq := ChatCompletionRequest{
 		Model:       req.Model,
 		Messages:    followMessages,
-		Temperature: req.Temperature,
+		Temperature: sanitizeTemperature(req.Model, req.Temperature),
 	}
 
 	secondResp, err := h.callOpenAI(ctx, secondReq)
@@ -204,7 +207,25 @@ func writeJSON(w http.ResponseWriter, v any, status int) {
 }
 
 func systemPrompt() string {
-	return "You are PayRam's assistant for analytics, setup, and debugging. Use MCP tools when they help. Stay focused on PayRam context."
+	return `You are PayRam's analytics assistant. ALWAYS call MCP tools to answer questions—never guess or say data is unavailable without trying.
+
+TOOL SELECTION GUIDE:
+- For per-day/daily breakdown (e.g., "payments each day", "daily counts"): Use payram_daily_stats with days=N
+- For transaction counts over time: Use payram_transaction_counts with days=N  
+- For total amounts/counts (all currencies): Use payram_payments_summary
+- For key metrics (total payments, users): Use payram_numbers_summary
+- For SPECIFIC CURRENCY queries (e.g., "USDC amount", "BTC transactions"): Use payram_currency_breakdown with currency_code parameter (e.g., currency_code="USDC")
+- For currency distribution breakdown: Use payram_deposit_distribution
+- For user growth (new vs recurring): Use payram_user_growth or payram_paying_users
+- For recent transactions table: Use payram_recent_transactions
+- For period comparison: Use payram_compare_periods
+- For any graph by ID: Use payram_fetch_graph_data (discover with payram_discover_analytics first)
+
+IMPORTANT: 
+- When user asks for "last N days", set the days parameter to N
+- When user mentions a SPECIFIC CURRENCY (USDC, BTC, ETH, etc.), use payram_currency_breakdown with currency_code set to that currency
+
+Reply concisely with the actual data. No preambles. If a tool fails, state the error briefly.`
 }
 
 // convert MCP tool descriptors to OpenAI tools schema.
@@ -252,6 +273,11 @@ func toParameterMap(s protocol.JSONSchema) map[string]interface{} {
 	} else if s.Type == "object" {
 		m["properties"] = map[string]interface{}{}
 	}
+	if s.Items != nil {
+		m["items"] = toParameterMap(*s.Items)
+	} else if s.Type == "array" {
+		m["items"] = map[string]interface{}{}
+	}
 	if s.AdditionalProperties != nil {
 		m["additionalProperties"] = s.AdditionalProperties
 	}
@@ -268,6 +294,49 @@ func renderContent(result protocol.CallResult) string {
 		sb.WriteString(c.Text)
 	}
 	return sb.String()
+}
+
+// sanitizeTemperature omits temperature when the target model does not support custom values.
+// Mini models (gpt-4.1-mini, gpt-4o-mini, gpt-5-mini, etc.) reject non-default temps; drop to avoid 400s.
+func sanitizeTemperature(model string, t *float64) *float64 {
+	if t == nil {
+		return nil
+	}
+	lowerModel := strings.ToLower(strings.TrimSpace(model))
+	if (strings.Contains(lowerModel, "mini") || strings.Contains(lowerModel, "gpt-4.1") || strings.Contains(lowerModel, "gpt-4o")) && *t != 1.0 {
+		return nil
+	}
+	return t
+}
+
+// bearerToken extracts the token portion from an Authorization header value.
+func bearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+	v := strings.TrimSpace(header)
+	if strings.HasPrefix(strings.ToLower(v), "bearer ") {
+		return strings.TrimSpace(v[7:])
+	}
+	return v
+}
+
+// injectAuthToken injects an auth token into tool args if not already provided.
+// All payram_* tools accept a "token" argument that defaults to PAYRAM_ANALYTICS_TOKEN env.
+func injectAuthToken(toolName, token string, args map[string]any) {
+	if token == "" {
+		return
+	}
+	if args == nil {
+		return
+	}
+	// Inject token for all payram_* tools that accept it
+	if strings.HasPrefix(toolName, "payram_") {
+		v, ok := args["token"]
+		if !ok || strings.TrimSpace(fmt.Sprint(v)) == "" {
+			args["token"] = token
+		}
+	}
 }
 
 // mapFromRaw attempts to turn raw JSON into a generic map; falls back to empty map on error.

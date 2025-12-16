@@ -39,7 +39,7 @@ Health check: `curl http://localhost:8080/health`
 ## Available tool
 - `payram_intro`: Returns a plain-text overview of PayRam and useful links.
 - `payram_analytics`: Calls PayRam analytics APIs. Actions:
-	- `list_groups`: GET analytics groups (requires `PAYRAM_ANALYTICS_TOKEN`, optional `PAYRAM_ANALYTICS_BASE_URL` default `https://testnet.resuefas.vip:8443`).
+	- `list_groups`: GET analytics groups (requires `PAYRAM_ANALYTICS_TOKEN`; `PAYRAM_ANALYTICS_BASE_URL` or `base_url` argument must be set).
 	- `graph_data`: POST group/graph data. Args: `group_id` (int), `graph_id` (int), `payload` (object, optional; defaults to `{ "analytics_date_filter": "last_30_days" }`).
 		Example payloads: filters like `group_by_network_currency_filter`, `in_query_currency_filter`, etc., as provided by the API.
 

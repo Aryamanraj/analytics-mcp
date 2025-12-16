@@ -13,12 +13,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/payram/payram-analytics-mcp-server/internal/mcp"
 	"github.com/payram/payram-analytics-mcp-server/internal/protocol"
 	"github.com/payram/payram-analytics-mcp-server/internal/tools"
 )
 
 func main() {
+	_ = godotenv.Load()
 	httpAddr := flag.String("http", "", "HTTP listen address (e.g., :8080). If set, server runs over HTTP instead of stdio.")
 	flag.Parse()
 
@@ -31,9 +33,34 @@ func main() {
 func run(httpAddr string) error {
 	ctx := context.Background()
 	tb := mcp.NewToolbox(
+		// Core info tools
 		tools.PayramIntro(),
-		tools.PayramAnalytics(),
 		tools.PayramDocs(),
+
+		// Generic discovery and fetch tools
+		tools.PayramDiscoverAnalytics(),
+		tools.PayramFetchGraphData(),
+
+		// Summary and metrics tools
+		tools.PayramPaymentsSummary(),
+		tools.PayramNumbersSummary(),
+		tools.PayramTransactionCounts(),
+		tools.PayramDailyStats(),
+
+		// Distribution and breakdown tools
+		tools.PayramDepositDistribution(),
+		tools.PayramCurrencyBreakdown(),
+		tools.PayramPayingUsers(),
+		tools.PayramUserGrowth(),
+
+		// Transaction tools
+		tools.PayramRecentTransactions(),
+
+		// Project-level analytics
+		tools.PayramProjectsSummary(),
+
+		// Comparison and analysis tools
+		tools.PayramComparePeriods(),
 	)
 	server := mcp.NewServer(tb)
 

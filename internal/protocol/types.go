@@ -39,6 +39,7 @@ type JSONSchema struct {
 	Required             []string              `json:"required,omitempty"`
 	Enum                 []string              `json:"enum,omitempty"`
 	Description          string                `json:"description,omitempty"`
+	Items                *JSONSchema           `json:"items,omitempty"`
 	AdditionalProperties any                   `json:"additionalProperties,omitempty"`
 }
 
