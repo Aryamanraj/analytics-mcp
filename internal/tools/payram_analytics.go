@@ -38,7 +38,7 @@ func (t *payramAnalyticsTool) Descriptor() protocol.ToolDescriptor {
 				},
 				"base_url": {
 					Type:        "string",
-					Description: "API base override; defaults to PAYRAM_ANALYTICS_BASE_URL or https://testnet.resuefas.vip:8443",
+					Description: "API base override; required if PAYRAM_ANALYTICS_BASE_URL env is not set",
 				},
 				"action": {
 					Type:        "string",
@@ -92,11 +92,11 @@ func (t *payramAnalyticsTool) Invoke(ctx context.Context, raw json.RawMessage) (
 		base = strings.TrimSpace(os.Getenv("PAYRAM_ANALYTICS_BASE_URL"))
 	}
 	base = strings.TrimSuffix(base, "/")
-	if base == "" {
-		base = "https://testnet.resuefas.vip:8443"
-	}
 	if token == "" {
 		return protocol.CallResult{}, &protocol.ResponseError{Code: -32000, Message: "Missing token: set PAYRAM_ANALYTICS_TOKEN env or pass token in arguments"}
+	}
+	if base == "" {
+		return protocol.CallResult{}, &protocol.ResponseError{Code: -32000, Message: "Missing base_url: set PAYRAM_ANALYTICS_BASE_URL env or pass base_url in arguments"}
 	}
 	switch args.Action {
 	case "list_groups":
