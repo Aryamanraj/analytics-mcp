@@ -2,10 +2,14 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -14,7 +18,14 @@ import (
 	"github.com/payram/payram-analytics-mcp-server/internal/version"
 )
 
-func NewMux(sup *supervisor.Supervisor) http.Handler {
+// Supervisor defines the minimal interface required from the supervisor.
+type Supervisor interface {
+	RestartAll() error
+	Status() supervisor.Status
+	Logs(component string, tail int) []string
+}
+
+func NewMux(sup Supervisor) http.Handler {
 	if sup == nil {
 		panic("supervisor must not be nil")
 	}
@@ -27,6 +38,9 @@ func NewMux(sup *supervisor.Supervisor) http.Handler {
 	adminGuard := NewAdminMiddlewareFromEnv()
 	mux.Handle("/admin/version", adminGuard(http.HandlerFunc(adminVersionHandler)))
 	mux.Handle("/admin/update/available", adminGuard(http.HandlerFunc(updateAvailableHandler)))
+	mux.Handle("/admin/update/apply", adminGuard(http.HandlerFunc(updateApplyHandler(sup))))
+	mux.Handle("/admin/update/rollback", adminGuard(http.HandlerFunc(updateRollbackHandler(sup))))
+	mux.Handle("/admin/update/status", adminGuard(http.HandlerFunc(updateStatusHandler)))
 	mux.Handle("/admin/child/restart", adminGuard(http.HandlerFunc(restartHandler(sup))))
 	mux.Handle("/admin/child/status", adminGuard(http.HandlerFunc(statusHandler(sup))))
 	mux.Handle("/admin/logs", adminGuard(http.HandlerFunc(logsHandler(sup))))
@@ -126,7 +140,283 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func restartHandler(sup *supervisor.Supervisor) func(http.ResponseWriter, *http.Request) {
+func updateApplyHandler(sup Supervisor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only POST allowed")
+			return
+		}
+
+		unlock, err := update.AcquireUpdateLock()
+		if err != nil {
+			if errors.Is(err, update.ErrUpdateInProgress) {
+				RespondError(w, http.StatusConflict, "UPDATE_IN_PROGRESS", "update already in progress")
+				return
+			}
+			RespondError(w, http.StatusInternalServerError, "LOCK_FAILED", err.Error())
+			return
+		}
+		defer func() { _ = unlock() }()
+
+		status, err := update.LoadStatus()
+		if err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_LOAD_FAILED", err.Error())
+			return
+		}
+		status.MarkAttempt()
+		if err := update.SaveStatus(status); err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
+			return
+		}
+		defer func() {
+			status.InProgress = false
+			_ = update.SaveStatus(status)
+		}()
+
+		baseURL := os.Getenv("PAYRAM_AGENT_UPDATE_BASE_URL")
+		if baseURL == "" {
+			RespondError(w, http.StatusInternalServerError, "UPDATE_BASE_URL_MISSING", "update base URL not configured")
+			return
+		}
+
+		pub := os.Getenv("PAYRAM_AGENT_UPDATE_PUBKEY_B64")
+		if pub == "" {
+			RespondError(w, http.StatusInternalServerError, "UPDATE_PUBKEY_MISSING", "update public key not configured")
+			return
+		}
+
+		coreURL := os.Getenv("PAYRAM_CORE_URL")
+		if coreURL == "" {
+			RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
+			return
+		}
+
+		channel := r.URL.Query().Get("channel")
+		if channel == "" {
+			channel = "stable"
+		}
+
+		manifest, raw, sig, err := update.FetchManifest(r.Context(), baseURL, channel)
+		if err != nil {
+			status.MarkFailure("UPDATE_FETCH_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "UPDATE_FETCH_FAILED", err.Error())
+			return
+		}
+
+		if err := update.VerifyManifest(raw, sig, pub); err != nil {
+			status.MarkFailure("SIGNATURE_INVALID", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "SIGNATURE_INVALID", err.Error())
+			return
+		}
+
+		if manifest.Revoked {
+			msg := "release revoked"
+			status.MarkFailure("REVOKED_RELEASE", msg)
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusBadRequest, "REVOKED_RELEASE", msg)
+			return
+		}
+
+		coreVersion, err := update.GetPayramCoreVersion(r.Context(), coreURL)
+		if err != nil {
+			status.MarkFailure("CORE_UNREACHABLE", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "CORE_UNREACHABLE", err.Error())
+			return
+		}
+
+		compat := manifest.Compatibility.PayramCore
+		compatible, reason := update.IsCompatible(coreVersion, compat.Min, compat.Max)
+		if !compatible {
+			if reason == "" {
+				reason = "incompatible payram-core version"
+			}
+			status.MarkFailure("INCOMPATIBLE_CORE", reason)
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusBadRequest, "INCOMPATIBLE_CORE", reason)
+			return
+		}
+
+		releaseDir := update.ReleaseDir(manifest.Version)
+		stageDir := filepath.Join(update.ReleasesDir(), manifest.Version+".tmp-"+randHex(6))
+
+		_ = os.RemoveAll(stageDir)
+		if err := os.MkdirAll(stageDir, 0o755); err != nil {
+			status.MarkFailure("STAGE_CREATE_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "STAGE_CREATE_FAILED", err.Error())
+			return
+		}
+
+		download := func(url, path, sha string) error {
+			if err := update.DownloadToFile(r.Context(), url, path); err != nil {
+				return fmt.Errorf("download: %w", err)
+			}
+			if err := update.VerifySHA256(path, sha); err != nil {
+				return fmt.Errorf("sha256: %w", err)
+			}
+			return os.Chmod(path, 0o755)
+		}
+
+		chatPath := filepath.Join(stageDir, "payram-analytics-chat")
+		if err := download(manifest.Artifacts.Chat.URL, chatPath, manifest.Artifacts.Chat.SHA256); err != nil {
+			status.MarkFailure("UPDATE_DOWNLOAD_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "UPDATE_DOWNLOAD_FAILED", err.Error())
+			return
+		}
+
+		mcpPath := filepath.Join(stageDir, "payram-analytics-mcp")
+		if err := download(manifest.Artifacts.MCP.URL, mcpPath, manifest.Artifacts.MCP.SHA256); err != nil {
+			status.MarkFailure("UPDATE_DOWNLOAD_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "UPDATE_DOWNLOAD_FAILED", err.Error())
+			return
+		}
+
+		_ = os.RemoveAll(releaseDir)
+		if err := os.Rename(stageDir, releaseDir); err != nil {
+			status.MarkFailure("FINALIZE_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "FINALIZE_FAILED", err.Error())
+			return
+		}
+
+		oldTarget, err := update.UpdateSymlinks(releaseDir)
+		if err != nil {
+			status.MarkFailure("SYMLINK_UPDATE_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "SYMLINK_UPDATE_FAILED", err.Error())
+			return
+		}
+
+		previousVersion := update.VersionFromTarget(oldTarget)
+		status.MarkSuccess(manifest.Version, previousVersion)
+		if err := update.SaveStatus(status); err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
+			return
+		}
+
+		if err := sup.RestartAll(); err != nil {
+			status.MarkFailure("RESTART_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+			return
+		}
+
+		healthErr := waitForHealth(envPort("PAYRAM_CHAT_PORT", 2358), envPort("PAYRAM_MCP_PORT", 3333), healthTimeout())
+		if healthErr != nil {
+			_, _ = update.UpdateSymlinks(oldTarget)
+			_ = sup.RestartAll()
+			status.MarkFailure("UPDATE_FAILED_ROLLED_BACK", healthErr.Error())
+			status.CurrentVersion = previousVersion
+			status.PreviousVersion = manifest.Version
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "UPDATE_FAILED_ROLLED_BACK", healthErr.Error())
+			return
+		}
+
+		status.MarkSuccess(manifest.Version, previousVersion)
+		if err := update.SaveStatus(status); err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
+			return
+		}
+
+		RespondOK(w, http.StatusOK, map[string]any{"ok": true, "updated_to": manifest.Version})
+	}
+}
+
+func updateRollbackHandler(sup Supervisor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only POST allowed")
+			return
+		}
+
+		unlock, err := update.AcquireUpdateLock()
+		if err != nil {
+			if errors.Is(err, update.ErrUpdateInProgress) {
+				RespondError(w, http.StatusConflict, "UPDATE_IN_PROGRESS", "update already in progress")
+				return
+			}
+			RespondError(w, http.StatusInternalServerError, "LOCK_FAILED", err.Error())
+			return
+		}
+		defer func() { _ = unlock() }()
+
+		status, err := update.LoadStatus()
+		if err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_LOAD_FAILED", err.Error())
+			return
+		}
+		status.MarkAttempt()
+		_ = update.SaveStatus(status)
+
+		prevTarget, err := os.Readlink(update.PreviousSymlink())
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			status.MarkFailure("ROLLBACK_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "ROLLBACK_FAILED", err.Error())
+			return
+		}
+
+		if prevTarget == "" {
+			status.MarkFailure("NO_PREVIOUS_VERSION", "no previous version to roll back to")
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusBadRequest, "NO_PREVIOUS_VERSION", "no previous version")
+			return
+		}
+
+		oldCurrent, err := update.UpdateSymlinks(prevTarget)
+		if err != nil {
+			status.MarkFailure("SYMLINK_UPDATE_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "SYMLINK_UPDATE_FAILED", err.Error())
+			return
+		}
+
+		if err := sup.RestartAll(); err != nil {
+			status.MarkFailure("RESTART_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
+			return
+		}
+
+		if err := waitForHealth(envPort("PAYRAM_CHAT_PORT", 2358), envPort("PAYRAM_MCP_PORT", 3333), healthTimeout()); err != nil {
+			status.MarkFailure("ROLLBACK_HEALTH_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "ROLLBACK_HEALTH_FAILED", err.Error())
+			return
+		}
+
+		status.MarkSuccess(update.VersionFromTarget(prevTarget), update.VersionFromTarget(oldCurrent))
+		if err := update.SaveStatus(status); err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
+			return
+		}
+
+		RespondOK(w, http.StatusOK, map[string]any{"ok": true, "rolled_back_to": update.VersionFromTarget(prevTarget)})
+	}
+}
+
+func updateStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only GET allowed")
+		return
+	}
+
+	status, err := update.LoadStatus()
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "STATUS_LOAD_FAILED", err.Error())
+		return
+	}
+
+	RespondOK(w, http.StatusOK, status)
+}
+
+func restartHandler(sup Supervisor) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only POST allowed")
@@ -142,13 +432,13 @@ func restartHandler(sup *supervisor.Supervisor) func(http.ResponseWriter, *http.
 	}
 }
 
-func statusHandler(sup *supervisor.Supervisor) func(http.ResponseWriter, *http.Request) {
+func statusHandler(sup Supervisor) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		RespondOK(w, http.StatusOK, sup.Status())
 	}
 }
 
-func logsHandler(sup *supervisor.Supervisor) func(http.ResponseWriter, *http.Request) {
+func logsHandler(sup Supervisor) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		component := r.URL.Query().Get("component")
 		if component == "" {
@@ -212,4 +502,70 @@ func envPort(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func healthTimeout() time.Duration {
+	if v := os.Getenv("PAYRAM_AGENT_HEALTH_TIMEOUT_MS"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 20 * time.Second
+}
+
+func randHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func waitForHealth(chatPort, mcpPort int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		if err := checkHealth(chatPort, mcpPort); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func checkHealth(chatPort, mcpPort int) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	chatURL := fmt.Sprintf("http://127.0.0.1:%d/health", chatPort)
+	mcpURL := fmt.Sprintf("http://127.0.0.1:%d/health", mcpPort)
+
+	if err := pingOnce(client, chatURL); err != nil {
+		return fmt.Errorf("chat health: %w", err)
+	}
+	if err := pingOnce(client, mcpURL); err != nil {
+		return fmt.Errorf("mcp health: %w", err)
+	}
+	return nil
+}
+
+func pingOnce(client *http.Client, url string) error {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
 }
