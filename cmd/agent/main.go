@@ -23,7 +23,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	sup := supervisor.NewFromEnv()
+	sup, err := supervisor.NewFromEnv()
+	if err != nil {
+		log.Fatalf("failed to configure supervisor: %v", err)
+	}
 	if err := sup.Start(ctx); err != nil {
 		log.Fatalf("failed to start supervisor: %v", err)
 	}

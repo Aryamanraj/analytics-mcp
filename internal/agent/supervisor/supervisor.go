@@ -11,11 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
-)
 
-const (
-	defaultChatPath = "./bin/payram-analytics-chat"
-	defaultMCPPath  = "./bin/payram-analytics-mcp"
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 )
 
 // Config controls supervisor behavior.
@@ -63,25 +60,39 @@ type Supervisor struct {
 }
 
 // NewFromEnv builds a Supervisor using environment overrides for binaries.
-func NewFromEnv() *Supervisor {
+func NewFromEnv() (*Supervisor, error) {
+	chatPath := getenvDefault("PAYRAM_AGENT_CHAT_BIN", update.DefaultChatBin())
+	mcpPath := getenvDefault("PAYRAM_AGENT_MCP_BIN", update.DefaultMCPBin())
+
+	if chatPath == update.DefaultChatBin() {
+		if _, err := os.Stat(chatPath); err != nil {
+			return nil, fmt.Errorf("chat binary not found at %s", chatPath)
+		}
+	}
+	if mcpPath == update.DefaultMCPBin() {
+		if _, err := os.Stat(mcpPath); err != nil {
+			return nil, fmt.Errorf("mcp binary not found at %s", mcpPath)
+		}
+	}
+
 	cfg := Config{
-		ChatPath:         getenvDefault("PAYRAM_AGENT_CHAT_BIN", defaultChatPath),
-		MCPPath:          getenvDefault("PAYRAM_AGENT_MCP_BIN", defaultMCPPath),
+		ChatPath:         chatPath,
+		MCPPath:          mcpPath,
 		BufferLines:      200,
 		InitialBackoff:   time.Second,
 		MaxBackoff:       30 * time.Second,
 		TerminateTimeout: 5 * time.Second,
 	}
-	return New(cfg)
+	return New(cfg), nil
 }
 
 // New builds a Supervisor from config.
 func New(cfg Config) *Supervisor {
 	if cfg.ChatPath == "" {
-		cfg.ChatPath = defaultChatPath
+		cfg.ChatPath = update.DefaultChatBin()
 	}
 	if cfg.MCPPath == "" {
-		cfg.MCPPath = defaultMCPPath
+		cfg.MCPPath = update.DefaultMCPBin()
 	}
 	if cfg.BufferLines <= 0 {
 		cfg.BufferLines = 200

@@ -10,6 +10,11 @@ import (
 
 const defaultHomeDir = "/var/lib/payram-mcp"
 
+const (
+	chatBinaryName = "payram-analytics-chat"
+	mcpBinaryName  = "payram-analytics-mcp"
+)
+
 // HomeDir resolves the agent home directory from PAYRAM_AGENT_HOME or default.
 func HomeDir() string {
 	if v := os.Getenv("PAYRAM_AGENT_HOME"); v != "" {
@@ -115,4 +120,14 @@ func VersionFromTarget(target string) string {
 		return ""
 	}
 	return filepath.Base(target)
+}
+
+// DefaultChatBin returns the default chat binary path inside the current release.
+func DefaultChatBin() string {
+	return filepath.Join(CurrentSymlink(), chatBinaryName)
+}
+
+// DefaultMCPBin returns the default MCP binary path inside the current release.
+func DefaultMCPBin() string {
+	return filepath.Join(CurrentSymlink(), mcpBinaryName)
 }
