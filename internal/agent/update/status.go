@@ -13,6 +13,8 @@ type UpdateStatus struct {
 	PreviousVersion     string    `json:"previous_version"`
 	LastSuccessVersion  string    `json:"last_success_version"`
 	LastSuccessAt       time.Time `json:"last_success_at"`
+	LastAttemptVersion  string    `json:"last_attempt_version"`
+	LastAttemptAt       time.Time `json:"last_attempt_at"`
 	LastErrorCode       string    `json:"last_error_code"`
 	LastErrorMessage    string    `json:"last_error_message"`
 	LastErrorAt         time.Time `json:"last_error_at"`
@@ -75,6 +77,8 @@ func SaveStatus(st UpdateStatus) error {
 func (s *UpdateStatus) MarkAttempt() {
 	s.InProgress = true
 	s.InProgressStartedAt = time.Now()
+	s.LastAttemptVersion = ""
+	s.LastAttemptAt = time.Now()
 	s.LastErrorCode = ""
 	s.LastErrorMessage = ""
 	s.LastErrorAt = time.Time{}

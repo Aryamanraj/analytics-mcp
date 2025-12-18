@@ -26,6 +26,12 @@ func TestStatusPersistence(t *testing.T) {
 	if loaded.PreviousVersion != st.PreviousVersion {
 		t.Fatalf("previous mismatch")
 	}
+	if loaded.LastAttemptAt.IsZero() {
+		t.Fatalf("expected attempt timestamp")
+	}
+	if loaded.LastAttemptVersion != "" {
+		t.Fatalf("expected empty attempt version")
+	}
 	if !loaded.InProgress {
 		t.Fatalf("expected in progress true")
 	}

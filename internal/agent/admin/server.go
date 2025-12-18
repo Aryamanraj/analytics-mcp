@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/supervisor"
@@ -93,12 +94,9 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, "UPDATE_PUBKEY_MISSING", "update public key not configured")
 		return
 	}
+	ignoreCompat := ignoreCompatEnabled()
 
 	coreURL := os.Getenv("PAYRAM_CORE_URL")
-	if coreURL == "" {
-		RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
-		return
-	}
 
 	channel := r.URL.Query().Get("channel")
 	if channel == "" {
@@ -116,27 +114,99 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	compatRange := manifest.Compatibility.PayramCore
+	coreInfo := map[string]any{
+		"min": compatRange.Min,
+		"max": compatRange.Max,
+	}
+
+	compatResult := map[string]any{
+		"ignored":    ignoreCompat,
+		"compatible": false,
+		"reason":     "",
+	}
+
+	if coreURL == "" {
+		if ignoreCompat {
+			compatResult["compatible"] = true
+			compatResult["reason"] = "compatibility ignored: PAYRAM_CORE_URL not set"
+			coreInfo["error_code"] = "CORE_URL_MISSING"
+			coreInfo["error_message"] = "payram core URL not configured"
+			coreInfo["compatible"] = compatResult["compatible"]
+			coreInfo["reason"] = compatResult["reason"]
+			coreInfo["ignored"] = ignoreCompat
+			RespondOK(w, http.StatusOK, map[string]any{
+				"available":      true,
+				"target_version": manifest.Version,
+				"notes":          manifest.Notes,
+				"revoked":        manifest.Revoked,
+				"payram_core":    coreInfo,
+				"compat":         compatResult,
+			})
+			return
+		}
+		RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
+		return
+	}
+
 	coreVersion, err := update.GetPayramCoreVersion(r.Context(), coreURL)
 	if err != nil {
+		if ignoreCompat {
+			compatResult["compatible"] = true
+			compatResult["reason"] = "compatibility ignored: core unreachable"
+			coreInfo["error_code"] = "CORE_UNREACHABLE"
+			coreInfo["error_message"] = err.Error()
+			coreInfo["compatible"] = compatResult["compatible"]
+			coreInfo["reason"] = compatResult["reason"]
+			coreInfo["ignored"] = ignoreCompat
+			RespondOK(w, http.StatusOK, map[string]any{
+				"available":      true,
+				"target_version": manifest.Version,
+				"notes":          manifest.Notes,
+				"revoked":        manifest.Revoked,
+				"payram_core":    coreInfo,
+				"compat":         compatResult,
+			})
+			return
+		}
 		RespondError(w, http.StatusInternalServerError, "CORE_UNREACHABLE", err.Error())
 		return
 	}
 
-	compat := manifest.Compatibility.PayramCore
-	compatible, reason := update.IsCompatible(coreVersion, compat.Min, compat.Max)
+	coreInfo["current"] = coreVersion
+	compatible, reason := update.IsCompatible(coreVersion, compatRange.Min, compatRange.Max)
+	compatResult["compatible"] = compatible
+	compatResult["reason"] = reason
+
+	if ignoreCompat && !compatible {
+		compatResult["compatible"] = true
+		compatResult["reason"] = fmt.Sprintf("compatibility ignored: %s", reason)
+	}
+
+	coreInfo["compatible"] = compatResult["compatible"]
+	coreInfo["reason"] = compatResult["reason"]
+	coreInfo["ignored"] = ignoreCompat
+
+	if !ignoreCompat && !compatible {
+		compatResult["compatible"] = false
+		RespondOK(w, http.StatusOK, map[string]any{
+			"available":      true,
+			"target_version": manifest.Version,
+			"notes":          manifest.Notes,
+			"revoked":        manifest.Revoked,
+			"payram_core":    coreInfo,
+			"compat":         compatResult,
+		})
+		return
+	}
 
 	RespondOK(w, http.StatusOK, map[string]any{
 		"available":      true,
 		"target_version": manifest.Version,
 		"notes":          manifest.Notes,
 		"revoked":        manifest.Revoked,
-		"payram_core": map[string]any{
-			"current":    coreVersion,
-			"min":        compat.Min,
-			"max":        compat.Max,
-			"compatible": compatible,
-			"reason":     reason,
-		},
+		"payram_core":    coreInfo,
+		"compat":         compatResult,
 	})
 }
 
@@ -146,6 +216,8 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 			RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only POST allowed")
 			return
 		}
+
+		ignoreCompat := ignoreCompatEnabled()
 
 		unlock, err := update.AcquireUpdateLock()
 		if err != nil {
@@ -186,10 +258,6 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 		}
 
 		coreURL := os.Getenv("PAYRAM_CORE_URL")
-		if coreURL == "" {
-			RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
-			return
-		}
 
 		channel := r.URL.Query().Get("channel")
 		if channel == "" {
@@ -211,6 +279,12 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 			return
 		}
 
+		status.LastAttemptVersion = manifest.Version
+		if err := update.SaveStatus(status); err != nil {
+			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
+			return
+		}
+
 		if manifest.Revoked {
 			msg := "release revoked"
 			status.MarkFailure("REVOKED_RELEASE", msg)
@@ -219,24 +293,46 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 			return
 		}
 
-		coreVersion, err := update.GetPayramCoreVersion(r.Context(), coreURL)
-		if err != nil {
-			status.MarkFailure("CORE_UNREACHABLE", err.Error())
-			_ = update.SaveStatus(status)
-			RespondError(w, http.StatusInternalServerError, "CORE_UNREACHABLE", err.Error())
-			return
-		}
-
-		compat := manifest.Compatibility.PayramCore
-		compatible, reason := update.IsCompatible(coreVersion, compat.Min, compat.Max)
-		if !compatible {
-			if reason == "" {
-				reason = "incompatible payram-core version"
+		warnings := []string{}
+		coreVersion := ""
+		if coreURL == "" {
+			if ignoreCompat {
+				warnings = append(warnings, "compatibility ignored: PAYRAM_CORE_URL not set")
+			} else {
+				status.MarkFailure("CORE_URL_MISSING", "payram core URL not configured")
+				_ = update.SaveStatus(status)
+				RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
+				return
 			}
-			status.MarkFailure("INCOMPATIBLE_CORE", reason)
-			_ = update.SaveStatus(status)
-			RespondError(w, http.StatusBadRequest, "INCOMPATIBLE_CORE", reason)
-			return
+		} else {
+			cv, err := update.GetPayramCoreVersion(r.Context(), coreURL)
+			if err != nil {
+				if ignoreCompat {
+					warnings = append(warnings, fmt.Sprintf("compatibility ignored: core unreachable (%s)", err.Error()))
+				} else {
+					status.MarkFailure("CORE_UNREACHABLE", err.Error())
+					_ = update.SaveStatus(status)
+					RespondError(w, http.StatusInternalServerError, "CORE_UNREACHABLE", err.Error())
+					return
+				}
+			} else {
+				coreVersion = cv
+				compat := manifest.Compatibility.PayramCore
+				compatible, reason := update.IsCompatible(coreVersion, compat.Min, compat.Max)
+				if !compatible {
+					if ignoreCompat {
+						warnings = append(warnings, fmt.Sprintf("compatibility ignored: %s", reason))
+					} else {
+						if reason == "" {
+							reason = "incompatible payram-core version"
+						}
+						status.MarkFailure("INCOMPATIBLE_CORE", reason)
+						_ = update.SaveStatus(status)
+						RespondError(w, http.StatusBadRequest, "INCOMPATIBLE_CORE", reason)
+						return
+					}
+				}
+			}
 		}
 
 		releaseDir := update.ReleaseDir(manifest.Version)
@@ -293,7 +389,8 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 		}
 
 		previousVersion := update.VersionFromTarget(oldTarget)
-		status.MarkSuccess(manifest.Version, previousVersion)
+		status.CurrentVersion = manifest.Version
+		status.PreviousVersion = previousVersion
 		if err := update.SaveStatus(status); err != nil {
 			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
 			return
@@ -310,10 +407,20 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 		if healthErr != nil {
 			_, _ = update.UpdateSymlinks(oldTarget)
 			_ = sup.RestartAll()
-			status.MarkFailure("UPDATE_FAILED_ROLLED_BACK", healthErr.Error())
-			status.CurrentVersion = previousVersion
-			status.PreviousVersion = manifest.Version
-			_ = update.SaveStatus(status)
+			reloaded, err := update.LoadStatus()
+			if err != nil {
+				RespondError(w, http.StatusInternalServerError, "STATUS_LOAD_FAILED", err.Error())
+				return
+			}
+			reloaded.MarkFailure("UPDATE_FAILED_ROLLED_BACK", healthErr.Error())
+			reloaded.CurrentVersion = previousVersion
+			reloaded.PreviousVersion = manifest.Version
+			if reloaded.LastAttemptVersion == "" {
+				reloaded.LastAttemptVersion = manifest.Version
+				reloaded.LastAttemptAt = time.Now()
+			}
+			_ = update.SaveStatus(reloaded)
+			status = reloaded
 			RespondError(w, http.StatusInternalServerError, "UPDATE_FAILED_ROLLED_BACK", healthErr.Error())
 			return
 		}
@@ -324,7 +431,12 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 			return
 		}
 
-		RespondOK(w, http.StatusOK, map[string]any{"ok": true, "updated_to": manifest.Version})
+		resp := map[string]any{"ok": true, "updated_to": manifest.Version}
+		if len(warnings) > 0 {
+			resp["warnings"] = warnings
+		}
+
+		RespondOK(w, http.StatusOK, resp)
 	}
 }
 
@@ -391,7 +503,13 @@ func updateRollbackHandler(sup Supervisor) http.HandlerFunc {
 			return
 		}
 
-		status.MarkSuccess(update.VersionFromTarget(prevTarget), update.VersionFromTarget(oldCurrent))
+		status.CurrentVersion = update.VersionFromTarget(prevTarget)
+		status.PreviousVersion = update.VersionFromTarget(oldCurrent)
+		status.InProgress = false
+		if status.LastAttemptVersion == "" {
+			status.LastAttemptVersion = status.CurrentVersion
+			status.LastAttemptAt = time.Now()
+		}
 		if err := update.SaveStatus(status); err != nil {
 			RespondError(w, http.StatusInternalServerError, "STATUS_SAVE_FAILED", err.Error())
 			return
@@ -414,6 +532,11 @@ func updateStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondOK(w, http.StatusOK, status)
+}
+
+func ignoreCompatEnabled() bool {
+	v := strings.ToLower(os.Getenv("PAYRAM_AGENT_IGNORE_COMPAT"))
+	return v == "1" || v == "true"
 }
 
 func restartHandler(sup Supervisor) func(http.ResponseWriter, *http.Request) {
@@ -513,6 +636,17 @@ func healthTimeout() time.Duration {
 	return 20 * time.Second
 }
 
+func childHealthPath() string {
+	path := os.Getenv("PAYRAM_AGENT_CHILD_HEALTH_PATH")
+	if path == "" {
+		return "/health"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
+}
+
 func randHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -525,7 +659,7 @@ func waitForHealth(chatPort, mcpPort int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		if err := checkHealth(chatPort, mcpPort); err == nil {
+		if err := checkHealth(chatPort, mcpPort, childHealthPath()); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -538,10 +672,10 @@ func waitForHealth(chatPort, mcpPort int, timeout time.Duration) error {
 	}
 }
 
-func checkHealth(chatPort, mcpPort int) error {
+func checkHealth(chatPort, mcpPort int, path string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	chatURL := fmt.Sprintf("http://127.0.0.1:%d/health", chatPort)
-	mcpURL := fmt.Sprintf("http://127.0.0.1:%d/health", mcpPort)
+	chatURL := fmt.Sprintf("http://127.0.0.1:%d%s", chatPort, path)
+	mcpURL := fmt.Sprintf("http://127.0.0.1:%d%s", mcpPort, path)
 
 	if err := pingOnce(client, chatURL); err != nil {
 		return fmt.Errorf("chat health: %w", err)

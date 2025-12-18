@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -159,6 +160,7 @@ type child struct {
 	name string
 	path string
 	args []string
+	env  []string
 
 	logBuf *ringBuffer
 
@@ -206,6 +208,7 @@ func (c *child) run(ctx context.Context, wg *sync.WaitGroup) {
 		}
 
 		cmd := exec.CommandContext(context.Background(), c.path, c.args...)
+		cmd.Env = c.childEnv()
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
 
@@ -339,6 +342,27 @@ func (c *child) pipeOutput(r io.ReadCloser, stream string) {
 	for scanner.Scan() {
 		c.logBuf.Add(fmt.Sprintf("[%s][%s] %s", c.name, stream, scanner.Text()))
 	}
+}
+
+func (c *child) childEnv() []string {
+	base := os.Environ()
+	switch c.name {
+	case "chat":
+		base = ensureEnv(base, "PAYRAM_CHAT_PORT", "2358")
+	case "mcp":
+		base = ensureEnv(base, "PAYRAM_MCP_PORT", "3333")
+	}
+	return base
+}
+
+func ensureEnv(env []string, key, def string) []string {
+	for i, kv := range env {
+		if strings.HasPrefix(kv, key+"=") {
+			return env
+		}
+		_ = i
+	}
+	return append(env, fmt.Sprintf("%s=%s", key, def))
 }
 
 func (c *child) sleep(ctx context.Context, d time.Duration) bool {

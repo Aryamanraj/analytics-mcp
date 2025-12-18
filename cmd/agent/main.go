@@ -9,12 +9,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/admin"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/supervisor"
 	"github.com/payram/payram-analytics-mcp-server/internal/logging"
 )
 
 func main() {
+	_ = godotenv.Load()
 	addr := os.Getenv("PAYRAM_AGENT_LISTEN_ADDR")
 	if addr == "" {
 		addr = ":9900"
