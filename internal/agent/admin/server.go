@@ -80,6 +80,12 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	coreURL := os.Getenv("PAYRAM_CORE_URL")
+	if coreURL == "" {
+		RespondError(w, http.StatusInternalServerError, "CORE_URL_MISSING", "payram core URL not configured")
+		return
+	}
+
 	channel := r.URL.Query().Get("channel")
 	if channel == "" {
 		channel = "stable"
@@ -96,11 +102,27 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	coreVersion, err := update.GetPayramCoreVersion(r.Context(), coreURL)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "CORE_UNREACHABLE", err.Error())
+		return
+	}
+
+	compat := manifest.Compatibility.PayramCore
+	compatible, reason := update.IsCompatible(coreVersion, compat.Min, compat.Max)
+
 	RespondOK(w, http.StatusOK, map[string]any{
 		"available":      true,
 		"target_version": manifest.Version,
 		"notes":          manifest.Notes,
 		"revoked":        manifest.Revoked,
+		"payram_core": map[string]any{
+			"current":    coreVersion,
+			"min":        compat.Min,
+			"max":        compat.Max,
+			"compatible": compatible,
+			"reason":     reason,
+		},
 	})
 }
 
