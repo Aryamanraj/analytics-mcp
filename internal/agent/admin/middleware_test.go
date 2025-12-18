@@ -90,7 +90,7 @@ func TestMiddlewareAllowsCIDR(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
-	req.RemoteAddr = "10.1.2.3:4000"
+	req.RemoteAddr = "10.1.2.3:2358"
 	req.Header.Set("Authorization", "Bearer secret")
 	rr := httptest.NewRecorder()
 
@@ -115,7 +115,7 @@ func TestMiddlewareBlocksIP(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
-	req.RemoteAddr = "8.8.8.8:8080"
+	req.RemoteAddr = "8.8.8.8:3333"
 	req.Header.Set("Authorization", "Bearer secret")
 	rr := httptest.NewRecorder()
 

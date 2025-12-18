@@ -1,8 +1,10 @@
 package update
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -130,4 +132,132 @@ func DefaultChatBin() string {
 // DefaultMCPBin returns the default MCP binary path inside the current release.
 func DefaultMCPBin() string {
 	return filepath.Join(CurrentSymlink(), mcpBinaryName)
+}
+
+// EnsureCompatSymlinks creates compatibility symlinks (chat, mcp) pointing to the canonical binaries.
+func EnsureCompatSymlinks(releaseDir string) error {
+	links := []struct {
+		name   string
+		target string
+	}{
+		{name: "chat", target: chatBinaryName},
+		{name: "mcp", target: mcpBinaryName},
+	}
+
+	for _, l := range links {
+		targetPath := filepath.Join(releaseDir, l.target)
+		if _, err := os.Stat(targetPath); err != nil {
+			return fmt.Errorf("compat target missing %s: %w", targetPath, err)
+		}
+		linkPath := filepath.Join(releaseDir, l.name)
+		_ = os.Remove(linkPath)
+		if err := os.Symlink(targetPath, linkPath); err != nil {
+			return fmt.Errorf("create compat symlink %s: %w", linkPath, err)
+		}
+	}
+	return nil
+}
+
+// EnsureSeedRelease creates an initial 0.0.0 release with chat/mcp binaries when no current symlink exists.
+// It is idempotent: if a valid current symlink already exists, it returns (false, "", nil).
+func EnsureSeedRelease(ctx context.Context, home string) (bool, string, error) {
+	if home == "" {
+		home = HomeDir()
+	}
+
+	current := filepath.Join(home, "current")
+	if info, err := os.Lstat(current); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if _, err := os.Readlink(current); err == nil {
+				return false, "", nil
+			}
+		}
+	}
+
+	releaseDir := filepath.Join(home, "releases", "0.0.0")
+	if err := os.MkdirAll(releaseDir, 0o755); err != nil {
+		return false, "", err
+	}
+
+	chatSrc := os.Getenv("PAYRAM_AGENT_SEED_CHAT_SRC")
+	if chatSrc == "" {
+		chatSrc = "/app/chat"
+	}
+	mcpSrc := os.Getenv("PAYRAM_AGENT_SEED_MCP_SRC")
+	if mcpSrc == "" {
+		mcpSrc = "/app/mcp"
+	}
+
+	chatDst := filepath.Join(releaseDir, chatBinaryName)
+	mcpDst := filepath.Join(releaseDir, mcpBinaryName)
+
+	if err := copyFileWithMode(chatSrc, chatDst, 0o755); err != nil {
+		return false, "", fmt.Errorf("seed chat copy: %w", err)
+	}
+	if err := copyFileWithMode(mcpSrc, mcpDst, 0o755); err != nil {
+		return false, "", fmt.Errorf("seed mcp copy: %w", err)
+	}
+	if err := EnsureCompatSymlinks(releaseDir); err != nil {
+		return false, "", err
+	}
+
+	oldHome := os.Getenv("PAYRAM_AGENT_HOME")
+	_ = os.Setenv("PAYRAM_AGENT_HOME", home)
+	defer func() {
+		if oldHome == "" {
+			_ = os.Unsetenv("PAYRAM_AGENT_HOME")
+		} else {
+			_ = os.Setenv("PAYRAM_AGENT_HOME", oldHome)
+		}
+	}()
+
+	if _, err := UpdateSymlinks(releaseDir); err != nil {
+		return false, "", err
+	}
+
+	status, err := LoadStatus()
+	if err == nil && status.CurrentVersion == "" {
+		status.CurrentVersion = "0.0.0"
+		_ = SaveStatus(status)
+	}
+
+	return true, "0.0.0", nil
+}
+
+func copyFileWithMode(src, dst string, mode os.FileMode) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	tmp := dst + ".tmp"
+	_ = os.Remove(tmp)
+	dstFile, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		dstFile.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := dstFile.Chmod(mode); err != nil {
+		dstFile.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := dstFile.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	_ = os.Remove(dst)
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return nil
 }

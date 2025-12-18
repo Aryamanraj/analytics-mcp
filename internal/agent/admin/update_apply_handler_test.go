@@ -121,6 +121,12 @@ func TestUpdateApplySuccess(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(update.ReleaseDir(manifest.Version), "payram-analytics-chat")); err != nil {
 		t.Fatalf("chat binary missing: %v", err)
 	}
+	if target, err := os.Readlink(filepath.Join(update.ReleaseDir(manifest.Version), "chat")); err != nil || filepath.Base(target) != "payram-analytics-chat" {
+		t.Fatalf("chat compat link missing/invalid: err=%v target=%s", err, target)
+	}
+	if target, err := os.Readlink(filepath.Join(update.ReleaseDir(manifest.Version), "mcp")); err != nil || filepath.Base(target) != "payram-analytics-mcp" {
+		t.Fatalf("mcp compat link missing/invalid: err=%v target=%s", err, target)
+	}
 }
 
 func TestUpdateApplyIgnoreCompatNoCoreURL(t *testing.T) {

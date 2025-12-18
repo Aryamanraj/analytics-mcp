@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/admin"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/supervisor"
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 	"github.com/payram/payram-analytics-mcp-server/internal/logging"
 )
 
@@ -20,6 +21,12 @@ func main() {
 	addr := os.Getenv("PAYRAM_AGENT_LISTEN_ADDR")
 	if addr == "" {
 		addr = ":9900"
+	}
+
+	if seeded, version, err := update.EnsureSeedRelease(context.Background(), update.HomeDir()); err != nil {
+		log.Fatalf("failed to seed release: %v", err)
+	} else if seeded {
+		log.Printf("seeded initial release %s", version)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

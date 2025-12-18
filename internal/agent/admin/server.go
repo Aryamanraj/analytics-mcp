@@ -380,6 +380,13 @@ func updateApplyHandler(sup Supervisor) http.HandlerFunc {
 			return
 		}
 
+		if err := update.EnsureCompatSymlinks(releaseDir); err != nil {
+			status.MarkFailure("FINALIZE_FAILED", err.Error())
+			_ = update.SaveStatus(status)
+			RespondError(w, http.StatusInternalServerError, "FINALIZE_FAILED", err.Error())
+			return
+		}
+
 		oldTarget, err := update.UpdateSymlinks(releaseDir)
 		if err != nil {
 			status.MarkFailure("SYMLINK_UPDATE_FAILED", err.Error())

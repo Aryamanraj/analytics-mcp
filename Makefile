@@ -12,8 +12,8 @@ BIN_MCP    ?= payram-analytics-mcp     # MCP HTTP only
 BIN_CHAT   ?= payram-analytics-chat    # Chat API only
 BIN_AGENT  ?= payram-analytics-agent   # Supervisor/agent entrypoint
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
-MCP_SERVER_URL ?= http://localhost:8080/
-CHAT_API_PORT ?= 4000
+MCP_SERVER_URL ?= http://localhost:3333/
+CHAT_API_PORT ?= 2358
 OPENAI_MODEL ?= gpt-4o-mini
 
 .PHONY: help
@@ -31,9 +31,9 @@ help:
 	@echo "  make build-chat           Build Chat API binary -> $(BIN_DIR)/$(BIN_CHAT)"
 	@echo "  make build-agent          Build supervisor agent -> $(BIN_DIR)/$(BIN_AGENT)"
 	@echo "  make build-all            Build app, mcp-server, Chat API, and agent"
-	@echo "  make run-app              Run combined app (MCP 8080 + Chat API 4000)"
-	@echo "  make run-mcp              Run mcp-server server on :8080"
-	@echo "  make run-chat             Run Chat API on :4000 (requires OPENAI_API_KEY)"
+	@echo "  make run-app              Run combined app (MCP 3333 + Chat API 2358)"
+	@echo "  make run-mcp              Run mcp-server server on :3333"
+	@echo "  make run-chat             Run Chat API on :2358 (requires OPENAI_API_KEY)"
 	@echo "  make run-agent            Run supervisor agent on :9900"
 	@echo "  make precommit            fmt-check + vet + test + build-all"
 	@echo "  make commit               Guide an interactive conventional commit"
@@ -97,7 +97,7 @@ run-app:
 
 .PHONY: run-mcp
 run-mcp:
-	$(GO) run cmd/mcp-server/main.go --http :8080
+	$(GO) run cmd/mcp-server/main.go --http :3333
 
 .PHONY: run-chat
 run-chat:
