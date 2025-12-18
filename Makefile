@@ -7,10 +7,10 @@ BIN_DIR ?= bin
 PKG := ./...
 
 # Binaries
-BIN_APP ?= payram-analytics        # MCP HTTP + optional Chat API
-BIN_MCP ?= payram-analytics-mcp    # MCP HTTP only
+BIN_APP  ?= payram-analytics         # combined MCP + Chat API
+BIN_MCP  ?= payram-analytics-mcp     # MCP HTTP only
+BIN_CHAT ?= payram-analytics-chat    # Chat API only
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
-CHAT_PORT ?= 3000
 MCP_SERVER_URL ?= http://localhost:8080/
 CHAT_API_PORT ?= 4000
 OPENAI_MODEL ?= gpt-4o-mini
@@ -25,13 +25,13 @@ help:
 	@echo "  make vet                  Run go vet"
 	@echo "  make test                 Run go test ./..."
 	@echo "  make cover                Run tests with coverage report"
-	@echo "  make build-app            Build app binary -> $(BIN_DIR)/$(BIN_APP)"
+	@echo "  make build-app            Build combined app -> $(BIN_DIR)/$(BIN_APP)"
 	@echo "  make build-mcp            Build MCP-only binary -> $(BIN_DIR)/$(BIN_MCP)"
-	@echo "  make build-all            Build both app and MCP-only"
-	@echo "  make run-app              Run app (MCP 8080 + Chat API 4000)"
+	@echo "  make build-chat           Build Chat API binary -> $(BIN_DIR)/$(BIN_CHAT)"
+	@echo "  make build-all            Build app, MCP-only, and Chat API"
+	@echo "  make run-app              Run combined app (MCP 8080 + Chat API 4000)"
 	@echo "  make run-mcp              Run MCP-only server on :8080"
-	@echo "  make run-chat             Run chat orchestrator (port 3000 by default)"
-	@echo "  make run-chat-api         Run OpenAI-compatible chat API (port 4000 by default)"
+	@echo "  make run-chat             Run Chat API on :4000 (requires OPENAI_API_KEY)"
 	@echo "  make precommit            fmt-check + vet + test + build-all"
 	@echo "  make commit               Guide an interactive conventional commit"
 	@echo "  make clean                Remove build artifacts and coverage files"
@@ -75,8 +75,13 @@ build-mcp:
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/$(BIN_MCP) cmd/mcp-only/main.go
 
+.PHONY: build-chat
+build-chat:
+	@mkdir -p $(BIN_DIR)
+	$(GO) build -o $(BIN_DIR)/$(BIN_CHAT) cmd/chat-api/main.go
+
 .PHONY: build-all
-build-all: build-app build-mcp
+build-all: build-app build-mcp build-chat
 
 .PHONY: run-app
 run-app:
@@ -88,10 +93,6 @@ run-mcp:
 
 .PHONY: run-chat
 run-chat:
-	$(GO) run ./cmd/chat-orchestrator --port $(CHAT_PORT) --mcp $(MCP_SERVER_URL)
-
-.PHONY: run-chat-api
-run-chat-api:
 	$(GO) run ./cmd/chat-api --port $(CHAT_API_PORT) --mcp $(MCP_SERVER_URL) --openai-model $(OPENAI_MODEL)
 
 .PHONY: precommit
