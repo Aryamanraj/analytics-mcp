@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/supervisor"
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 	"github.com/payram/payram-analytics-mcp-server/internal/version"
 )
 
@@ -25,6 +26,7 @@ func NewMux(sup *supervisor.Supervisor) http.Handler {
 
 	adminGuard := NewAdminMiddlewareFromEnv()
 	mux.Handle("/admin/version", adminGuard(http.HandlerFunc(adminVersionHandler)))
+	mux.Handle("/admin/update/available", adminGuard(http.HandlerFunc(updateAvailableHandler)))
 	mux.Handle("/admin/child/restart", adminGuard(http.HandlerFunc(restartHandler(sup))))
 	mux.Handle("/admin/child/status", adminGuard(http.HandlerFunc(statusHandler(sup))))
 	mux.Handle("/admin/logs", adminGuard(http.HandlerFunc(logsHandler(sup))))
@@ -57,6 +59,48 @@ func adminVersionHandler(w http.ResponseWriter, r *http.Request) {
 		"agent": version.Get(),
 		"chat":  chat,
 		"mcp":   mcp,
+	})
+}
+
+func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only GET allowed")
+		return
+	}
+
+	baseURL := os.Getenv("PAYRAM_AGENT_UPDATE_BASE_URL")
+	if baseURL == "" {
+		RespondError(w, http.StatusInternalServerError, "UPDATE_BASE_URL_MISSING", "update base URL not configured")
+		return
+	}
+
+	pub := os.Getenv("PAYRAM_AGENT_UPDATE_PUBKEY_B64")
+	if pub == "" {
+		RespondError(w, http.StatusInternalServerError, "UPDATE_PUBKEY_MISSING", "update public key not configured")
+		return
+	}
+
+	channel := r.URL.Query().Get("channel")
+	if channel == "" {
+		channel = "stable"
+	}
+
+	manifest, raw, sig, err := update.FetchManifest(r.Context(), baseURL, channel)
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "UPDATE_FETCH_FAILED", err.Error())
+		return
+	}
+
+	if err := update.VerifyManifest(raw, sig, pub); err != nil {
+		RespondError(w, http.StatusInternalServerError, "SIGNATURE_INVALID", err.Error())
+		return
+	}
+
+	RespondOK(w, http.StatusOK, map[string]any{
+		"available":      true,
+		"target_version": manifest.Version,
+		"notes":          manifest.Notes,
+		"revoked":        manifest.Revoked,
 	})
 }
 
