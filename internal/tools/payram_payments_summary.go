@@ -105,6 +105,14 @@ func (t *payramPaymentsSummaryTool) Invoke(ctx context.Context, raw json.RawMess
 		return protocol.CallResult{}, err
 	}
 
+	// If the caller explicitly requested a range (days/date_filter/custom), avoid the static “Numbers” group
+	userProvidedRange := args.Days > 0 || strings.TrimSpace(args.DateFilter) != "" || strings.TrimSpace(args.CustomStartISO) != "" || strings.TrimSpace(args.CustomEndISO) != ""
+	if userProvidedRange {
+		groups = filterOutGroups(groups, func(name string) bool {
+			return strings.Contains(name, "numbers")
+		})
+	}
+
 	amountSel := pickGraph(groups, amountGraphNames())
 	countSel := pickGraph(groups, countGraphNames())
 
@@ -225,6 +233,19 @@ type graphSelection struct {
 	graphID int
 	name    string
 	filters []paymentsAnalyticsFilter
+}
+
+// filterOutGroups removes analytics groups whose name matcher returns true.
+func filterOutGroups(groups []paymentsGroupWrapper, shouldSkip func(lowerName string) bool) []paymentsGroupWrapper {
+	out := make([]paymentsGroupWrapper, 0, len(groups))
+	for _, g := range groups {
+		name := strings.ToLower(g.AnalyticsGroup.Name)
+		if shouldSkip(name) {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 func amountGraphNames() []string {

@@ -3,9 +3,12 @@ SHELL := /usr/bin/env bash
 
 GO ?= go
 GOFMT ?= gofmt
-BINARY ?= mcp-server
 BIN_DIR ?= bin
 PKG := ./...
+
+# Binaries
+BIN_APP ?= payram-analytics        # MCP HTTP + optional Chat API
+BIN_MCP ?= payram-analytics-mcp    # MCP HTTP only
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 CHAT_PORT ?= 3000
 MCP_SERVER_URL ?= http://localhost:8080/
@@ -16,20 +19,22 @@ OPENAI_MODEL ?= gpt-4o-mini
 help:
 	@echo "PayRam MCP server automation"
 	@echo "Targets:"
-	@echo "  make setup          Download module deps (go mod tidy)"
-	@echo "  make fmt            Run go fmt on all packages"
-	@echo "  make fmt-check      Check formatting (gofmt -l)"
-	@echo "  make vet            Run go vet"
-	@echo "  make test           Run go test ./..."
-	@echo "  make cover          Run tests with coverage report"
-	@echo "  make build          Build binary to $(BIN_DIR)/$(BINARY)"
-	@echo "  make run            Run server (stdio)"
-	@echo "  make run-http       Run server over HTTP (:8080 by default)"
-	@echo "  make run-chat       Run chat orchestrator (port 3000 by default)"
-	@echo "  make run-chat-api   Run OpenAI-compatible chat API (port 4000 by default)"
-	@echo "  make precommit      fmt-check + vet + test + build"
-	@echo "  make commit         Guide an interactive conventional commit"
-	@echo "  make clean          Remove build artifacts and coverage files"
+	@echo "  make setup                Download module deps (go mod tidy)"
+	@echo "  make fmt                  Run go fmt on all packages"
+	@echo "  make fmt-check            Check formatting (gofmt -l)"
+	@echo "  make vet                  Run go vet"
+	@echo "  make test                 Run go test ./..."
+	@echo "  make cover                Run tests with coverage report"
+	@echo "  make build-app            Build app binary -> $(BIN_DIR)/$(BIN_APP)"
+	@echo "  make build-mcp            Build MCP-only binary -> $(BIN_DIR)/$(BIN_MCP)"
+	@echo "  make build-all            Build both app and MCP-only"
+	@echo "  make run-app              Run app (MCP 8080 + Chat API 4000)"
+	@echo "  make run-mcp              Run MCP-only server on :8080"
+	@echo "  make run-chat             Run chat orchestrator (port 3000 by default)"
+	@echo "  make run-chat-api         Run OpenAI-compatible chat API (port 4000 by default)"
+	@echo "  make precommit            fmt-check + vet + test + build-all"
+	@echo "  make commit               Guide an interactive conventional commit"
+	@echo "  make clean                Remove build artifacts and coverage files"
 
 .PHONY: setup
 setup:
@@ -60,18 +65,26 @@ cover:
 	$(GO) test -coverprofile=coverage.out $(PKG)
 	$(GO) tool cover -func=coverage.out
 
-.PHONY: build
-build:
+.PHONY: build-app
+build-app:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -o $(BIN_DIR)/$(BINARY) .
+	$(GO) build -o $(BIN_DIR)/$(BIN_APP) .
 
-.PHONY: run
-run:
+.PHONY: build-mcp
+build-mcp:
+	@mkdir -p $(BIN_DIR)
+	$(GO) build -o $(BIN_DIR)/$(BIN_MCP) cmd/mcp-only/main.go
+
+.PHONY: build-all
+build-all: build-app build-mcp
+
+.PHONY: run-app
+run-app:
 	$(GO) run .
 
-.PHONY: run-http
-run-http:
-	$(GO) run . --http :8080
+.PHONY: run-mcp
+run-mcp:
+	$(GO) run cmd/mcp-only/main.go --http :8080
 
 .PHONY: run-chat
 run-chat:
@@ -87,7 +100,7 @@ precommit:
 	$(MAKE) fmt-check; \
 	$(MAKE) vet; \
 	$(MAKE) test; \
-	$(MAKE) build
+	$(MAKE) build-all
 
 .PHONY: commit
 commit: precommit

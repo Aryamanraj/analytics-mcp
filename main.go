@@ -1,158 +1,85 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
+	"net/http"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/payram/payram-analytics-mcp-server/internal/mcp"
-	"github.com/payram/payram-analytics-mcp-server/internal/protocol"
-	"github.com/payram/payram-analytics-mcp-server/internal/tools"
+	"github.com/payram/payram-analytics-mcp-server/internal/app"
+	"github.com/payram/payram-analytics-mcp-server/internal/chatapi"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
 	_ = godotenv.Load()
-	httpAddr := flag.String("http", "", "HTTP listen address (e.g., :8080). If set, server runs over HTTP instead of stdio.")
+
+	// Flags / env
+	mcpAddr := flag.String("mcp-http", envOr("MCP_HTTP_ADDR", ":8080"), "MCP HTTP listen address (e.g., :8080)")
+	chatPort := flag.String("chat-port", envOr("CHAT_API_PORT", "4000"), "Chat API port")
+	chatAPIKey := flag.String("chat-api-key", envOr("CHAT_API_KEY", ""), "Chat API bearer key")
+	openaiKey := flag.String("openai-key", envOr("OPENAI_API_KEY", ""), "OpenAI API key")
+	openaiModel := flag.String("openai-model", envOr("OPENAI_MODEL", "gpt-4o-mini"), "OpenAI model")
+	openaiBase := flag.String("openai-base", envOr("OPENAI_BASE_URL", "https://api.openai.com/v1"), "OpenAI base URL")
+	disableChat := flag.Bool("no-chat", false, "Disable chat API server")
 	flag.Parse()
 
-	if err := run(*httpAddr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if !*disableChat && strings.TrimSpace(*openaiKey) == "" {
+		log.Fatalf("OPENAI_API_KEY is required unless --no-chat is set")
+	}
+
+	// Launch MCP HTTP server
+	mcpErrCh := make(chan error, 1)
+	go func() {
+		log.Printf("MCP server listening on %s", *mcpAddr)
+		if err := app.RunMCPHTTP(*mcpAddr); err != nil {
+			mcpErrCh <- fmt.Errorf("mcp server: %w", err)
+		}
+	}()
+
+	// Optionally launch chat API server (still pointing to MCP HTTP at the same port)
+	if !*disableChat {
+		chatErrCh := make(chan error, 1)
+		go func() {
+			logger := logrus.New().WithField("component", "chat-api")
+			mcpURL := envOr("MCP_SERVER_URL", fmt.Sprintf("http://localhost%s/", strings.TrimPrefix(*mcpAddr, "")))
+			h := chatapi.NewHandler(logger, *chatAPIKey, *openaiKey, *openaiModel, *openaiBase, mcpURL)
+			mux := http.NewServeMux()
+			h.Register(mux)
+
+			srv := &http.Server{
+				Addr:              ":" + strings.TrimPrefix(*chatPort, ":"),
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			logger.Infof("Chat API listening on :%s (model=%s mcp=%s)", strings.TrimPrefix(*chatPort, ":"), *openaiModel, mcpURL)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				chatErrCh <- fmt.Errorf("chat api: %w", err)
+			}
+		}()
+
+		// Wait for either server to error
+		select {
+		case err := <-mcpErrCh:
+			log.Fatalf("MCP server error: %v", err)
+		case err := <-chatErrCh:
+			log.Fatalf("Chat API error: %v", err)
+		}
+	} else {
+		// Only MCP server running
+		if err := <-mcpErrCh; err != nil {
+			log.Fatalf("MCP server error: %v", err)
+		}
 	}
 }
 
-func run(httpAddr string) error {
-	ctx := context.Background()
-	tb := mcp.NewToolbox(
-		// Core info tools
-		tools.PayramIntro(),
-		tools.PayramDocs(),
-
-		// Generic discovery and fetch tools
-		tools.PayramDiscoverAnalytics(),
-		tools.PayramFetchGraphData(),
-
-		// Summary and metrics tools
-		tools.PayramPaymentsSummary(),
-		tools.PayramNumbersSummary(),
-		tools.PayramTransactionCounts(),
-		tools.PayramDailyStats(),
-
-		// Distribution and breakdown tools
-		tools.PayramDepositDistribution(),
-		tools.PayramCurrencyBreakdown(),
-		tools.PayramPayingUsers(),
-		tools.PayramUserGrowth(),
-
-		// Transaction tools
-		tools.PayramRecentTransactions(),
-
-		// Project-level analytics
-		tools.PayramProjectsSummary(),
-
-		// Comparison and analysis tools
-		tools.PayramComparePeriods(),
-	)
-	server := mcp.NewServer(tb)
-
-	if httpAddr != "" {
-		log.Printf("starting HTTP MCP server on %s", httpAddr)
-		return mcp.RunHTTP(server, httpAddr)
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		raw, err := readFrame(reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("read error: %w", err)
-		}
-		if raw == "" {
-			continue
-		}
-
-		var req protocol.Request
-		if err := json.Unmarshal([]byte(raw), &req); err != nil {
-			emitResponse(mcp.WriteError(defaultID(), -32700, "invalid JSON", err))
-			continue
-		}
-
-		resp, err := server.Handle(ctx, req)
-		if err != nil {
-			emitResponse(mcp.WriteError(req.ID, -32603, "internal error", err))
-			continue
-		}
-		emitResponse(resp)
-	}
-}
-
-func readFrame(r *bufio.Reader) (string, error) {
-	line, err := r.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return "", nil
-	}
-
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "content-length:") {
-		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) != 2 {
-			return "", fmt.Errorf("malformed Content-Length header")
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if err != nil {
-			return "", fmt.Errorf("invalid Content-Length: %w", err)
-		}
-		// consume until blank line
-		for {
-			h, err := r.ReadString('\n')
-			if err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(h) == "" {
-				break
-			}
-		}
-		body := make([]byte, n)
-		nread, err := io.ReadFull(r, body)
-		if err != nil {
-			if errors.Is(err, io.ErrUnexpectedEOF) && nread > 0 {
-				return strings.TrimSpace(string(body[:nread])), nil
-			}
-			return "", err
-		}
-		return strings.TrimSpace(string(body)), nil
-	}
-
-	return trimmed, nil
-}
-
-func defaultID() any {
-	return "0"
-}
-
-func emitResponse(resp protocol.Response) {
-	body, err := json.Marshal(resp)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to encode response: %v\n", err)
-		return
-	}
-	// Emit newline-delimited JSON; inspector stdio expects raw JSON per line.
-	if _, err := os.Stdout.Write(append(body, '\n')); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write response: %v\n", err)
-	}
+	return fallback
 }

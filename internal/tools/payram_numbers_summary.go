@@ -27,7 +27,7 @@ func PayramNumbersSummary() *payramNumbersSummaryTool {
 func (t *payramNumbersSummaryTool) Descriptor() protocol.ToolDescriptor {
 	return protocol.ToolDescriptor{
 		Name:        "payram_numbers_summary",
-		Description: "Fetch key numeric metrics: total payments, payments in last 30 days, total paying users, users in last 30 days, total users requested, users attempted in last 30 days.",
+		Description: "Fetch key numeric metrics (all-time/static 'Numbers' group): total payments, payments in last 30 days, total paying users, users in last 30 days, total users requested, users attempted in last 30 days. Note: this group is static and may ignore date ranges; prefer date-aware tools for ranged queries.",
 		InputSchema: &protocol.JSONSchema{
 			Type: "object",
 			Properties: map[string]protocol.JSONSchema{
