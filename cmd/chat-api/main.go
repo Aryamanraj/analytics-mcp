@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/payram/payram-analytics-mcp-server/internal/chatapi"
 	"github.com/payram/payram-analytics-mcp-server/internal/logging"
+	"github.com/payram/payram-analytics-mcp-server/internal/version"
 	"github.com/sirupsen/logrus"
 )
 
@@ -42,6 +44,10 @@ func main() {
 	h := chatapi.NewHandler(logger, apiKey, openaiKey, openaiModel, openaiBase, mcpURL)
 	mux := http.NewServeMux()
 	h.Register(mux)
+	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(version.Get())
+	})
 
 	handler := logRequests(logger, mux)
 

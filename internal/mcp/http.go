@@ -7,6 +7,7 @@ import (
 
 	"github.com/payram/payram-analytics-mcp-server/internal/logging"
 	"github.com/payram/payram-analytics-mcp-server/internal/protocol"
+	"github.com/payram/payram-analytics-mcp-server/internal/version"
 	"github.com/sirupsen/logrus"
 )
 
@@ -22,6 +23,11 @@ func RunHTTP(server *Server, addr string) error {
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+
+	http.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(version.Get())
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
