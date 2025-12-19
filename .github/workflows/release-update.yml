@@ -76,9 +76,9 @@ jobs:
             -version "${{ steps.meta.outputs.version }}" \
             -notes "$NOTES" \
             -released_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-            -chat_url "https://github.com/PayRam/analytics-mcp-server/releases/download/${{ steps.meta.outputs.tag }}/chat.bin" \
+            -chat_url "https://github.com/Aryamanraj/analytics-mcp/releases/download/${{ steps.meta.outputs.tag }}/chat.bin" \
             -chat_sha "${{ steps.shas.outputs.chat_sha }}" \
-            -mcp_url "https://github.com/PayRam/analytics-mcp-server/releases/download/${{ steps.meta.outputs.tag }}/mcp.bin" \
+            -mcp_url "https://github.com/Aryamanraj/analytics-mcp/releases/download/${{ steps.meta.outputs.tag }}/mcp.bin" \
             -mcp_sha "${{ steps.shas.outputs.mcp_sha }}" \
             -output_dir "$OUT_DIR"
 
