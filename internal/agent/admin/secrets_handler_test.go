@@ -30,7 +30,7 @@ func TestSecretsHandlers(t *testing.T) {
 	buf, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPut, "/admin/secrets/openai", bytes.NewReader(buf))
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -40,7 +40,7 @@ func TestSecretsHandlers(t *testing.T) {
 	// Status should show set
 	req = httptest.NewRequest(http.MethodGet, "/admin/secrets/status", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -62,7 +62,7 @@ func TestSecretsHandlers(t *testing.T) {
 	// Delete
 	req = httptest.NewRequest(http.MethodDelete, "/admin/secrets/openai", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -72,7 +72,7 @@ func TestSecretsHandlers(t *testing.T) {
 	// Status should show missing
 	req = httptest.NewRequest(http.MethodGet, "/admin/secrets/status", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

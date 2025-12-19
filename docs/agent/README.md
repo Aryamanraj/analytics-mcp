@@ -12,11 +12,11 @@ The agent supervises the Chat API and MCP processes, manages versioned releases,
   ```
 
 ## Authentication
-Admin endpoints require a bearer token and optional IP allowlist:
+Admin endpoints require the `X-MCP-Key` header and an optional IP allowlist:
 - `PAYRAM_AGENT_ADMIN_TOKEN` (required)
 - `PAYRAM_AGENT_ADMIN_ALLOWLIST` (comma-separated CIDRs; empty allows any)
 
-Send `Authorization: Bearer <token>` on `/admin/*` routes.
+Send header `X-MCP-Key: <token>` on `/admin/*` routes.
 
 ## API surface
 Base URL defaults to `http://localhost:9900`.
@@ -33,6 +33,8 @@ Base URL defaults to `http://localhost:9900`.
 | `/admin/child/status` | GET | yes | Supervisor child status (chat, mcp: pid, restarts, last exit).
 | `/admin/child/restart` | POST | yes | Restarts both children.
 | `/admin/logs?component=chat|mcp&tail=N` | GET | yes | Recent buffered logs for a component (default tail 200).
+| `/admin/secrets/openai` | PUT/DELETE | yes | PUT stores `openai_api_key` (body `{ "openai_api_key": "sk-..." }`); DELETE clears it. Never echoed back.
+| `/admin/secrets/status` | GET | yes | Reports if `openai_api_key` is set and its source (`env|state|missing`).
 
 ## Update settings
 - `PAYRAM_AGENT_UPDATE_BASE_URL` (required): base hosting `<channel>/manifest.json` and `.sig`.
@@ -49,34 +51,35 @@ Base URL defaults to `http://localhost:9900`.
 - Compat links: `chat -> payram-analytics-chat`, `mcp -> payram-analytics-mcp`.
 - Symlinks: `${PAYRAM_AGENT_HOME}/current` (active), `${PAYRAM_AGENT_HOME}/previous` (last).
 - State: `${PAYRAM_AGENT_HOME}/state/update_status.json`.
+- Secrets: `${PAYRAM_AGENT_HOME}/state/secrets.json` (never logged or returned).
 
 ## Example calls
 Check status:
 ```sh
-curl -s -H "Authorization: Bearer $PAYRAM_AGENT_ADMIN_TOKEN" \
+curl -s -H "X-MCP-Key: $PAYRAM_AGENT_ADMIN_TOKEN" \
   http://localhost:9900/admin/update/status
 ```
 
 Check availability on `stable`:
 ```sh
-curl -s -H "Authorization: Bearer $PAYRAM_AGENT_ADMIN_TOKEN" \
+curl -s -H "X-MCP-Key: $PAYRAM_AGENT_ADMIN_TOKEN" \
   "http://localhost:9900/admin/update/available?channel=stable"
 ```
 
 Apply latest:
 ```sh
-curl -X POST -H "Authorization: Bearer $PAYRAM_AGENT_ADMIN_TOKEN" \
+curl -X POST -H "X-MCP-Key: $PAYRAM_AGENT_ADMIN_TOKEN" \
   http://localhost:9900/admin/update/apply
 ```
 
 Rollback:
 ```sh
-curl -X POST -H "Authorization: Bearer $PAYRAM_AGENT_ADMIN_TOKEN" \
+curl -X POST -H "X-MCP-Key: $PAYRAM_AGENT_ADMIN_TOKEN" \
   http://localhost:9900/admin/update/rollback
 ```
 
 Fetch child logs (last 100 lines of chat):
 ```sh
-curl -s -H "Authorization: Bearer $PAYRAM_AGENT_ADMIN_TOKEN" \
+curl -s -H "X-MCP-Key: $PAYRAM_AGENT_ADMIN_TOKEN" \
   "http://localhost:9900/admin/logs?component=chat&tail=100"
 ```

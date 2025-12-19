@@ -1,0 +1,109 @@
+name: Release and Publish Update Manifest
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-beta.*"
+      - "beta-v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build linux amd64 binaries
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o chat.bin ./cmd/chat-api
+          GOOS=linux GOARCH=amd64 go build -o mcp.bin ./cmd/mcp-server
+
+      - name: Compute sha256 sums
+        id: shas
+        run: |
+          CHAT_SHA=$(sha256sum chat.bin | awk '{print $1}')
+          MCP_SHA=$(sha256sum mcp.bin | awk '{print $1}')
+          echo "chat_sha=$CHAT_SHA" >> "$GITHUB_OUTPUT"
+          echo "mcp_sha=$MCP_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Determine channel and version
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          CHANNEL=stable
+          if [[ "$TAG" == *"-beta"* ]] || [[ "$TAG" == beta-* ]]; then
+            CHANNEL=beta
+          fi
+          if [[ "$TAG" == *"-beta."* ]]; then
+            CHANNEL=beta
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+      - name: Generate manifest and signature
+        env:
+          PAYRAM_UPDATE_ED25519_PRIVKEY_B64: ${{ secrets.PAYRAM_UPDATE_ED25519_PRIVKEY_B64 }}
+        run: |
+          if [ -z "$PAYRAM_UPDATE_ED25519_PRIVKEY_B64" ]; then
+            echo "PAYRAM_UPDATE_ED25519_PRIVKEY_B64 is required" >&2
+            exit 1
+          fi
+          OUT_DIR="updates/${{ steps.meta.outputs.channel }}"
+          NOTES="Release ${{ steps.meta.outputs.tag }}"
+          go run ./scripts/manifestgen \
+            -channel "${{ steps.meta.outputs.channel }}" \
+            -version "${{ steps.meta.outputs.version }}" \
+            -notes "$NOTES" \
+            -released_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            -chat_url "https://github.com/PayRam/analytics-mcp-server/releases/download/${{ steps.meta.outputs.tag }}/chat.bin" \
+            -chat_sha "${{ steps.shas.outputs.chat_sha }}" \
+            -mcp_url "https://github.com/PayRam/analytics-mcp-server/releases/download/${{ steps.meta.outputs.tag }}/mcp.bin" \
+            -mcp_sha "${{ steps.shas.outputs.mcp_sha }}" \
+            -output_dir "$OUT_DIR"
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          draft: false
+          prerelease: ${{ steps.meta.outputs.channel == 'beta' }}
+          files: |
+            chat.bin
+            mcp.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit manifest back to default branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin "$DEFAULT_BRANCH":"$DEFAULT_BRANCH"
+          git checkout "$DEFAULT_BRANCH"
+          git pull origin "$DEFAULT_BRANCH"
+          git add updates/${{ steps.meta.outputs.channel }}/manifest.json updates/${{ steps.meta.outputs.channel }}/manifest.json.sig
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update ${{ steps.meta.outputs.channel }} manifest for ${{ steps.meta.outputs.tag }}" || echo "No manifest changes to commit"
+          git push origin "$DEFAULT_BRANCH"

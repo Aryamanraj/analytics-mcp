@@ -64,7 +64,7 @@ func TestUpdateAvailableSuccess(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/update/available?channel=stable", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -133,7 +133,7 @@ func TestUpdateAvailableSignatureInvalid(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/update/available", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -192,7 +192,7 @@ func TestUpdateAvailableCoreIncompatible(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/update/available", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -243,7 +243,7 @@ func TestUpdateAvailableCoreUnreachable(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/update/available", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -290,7 +290,7 @@ func TestUpdateAvailableIgnoreCompatNoCoreURL(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/update/available", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)

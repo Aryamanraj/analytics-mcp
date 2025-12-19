@@ -87,7 +87,7 @@ func TestUpdateApplySuccess(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/update/apply", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -185,7 +185,7 @@ func TestUpdateApplyIgnoreCompatNoCoreURL(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/update/apply", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -280,7 +280,7 @@ func TestUpdateApplyHealthRollback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/update/apply", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -356,7 +356,7 @@ func TestRollbackEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/update/rollback", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(adminKeyHeader, "tok")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)

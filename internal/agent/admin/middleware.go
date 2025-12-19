@@ -23,6 +23,8 @@ type adminMiddleware struct {
 	allowed []*net.IPNet
 }
 
+const adminKeyHeader = "X-MCP-Key"
+
 func (m *adminMiddleware) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.token == "" {
@@ -36,16 +38,14 @@ func (m *adminMiddleware) wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		const bearerPrefix = "Bearer "
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, bearerPrefix) {
-			RespondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid bearer token")
+		key := strings.TrimSpace(r.Header.Get(adminKeyHeader))
+		if key == "" {
+			RespondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid admin key")
 			return
 		}
 
-		provided := strings.TrimSpace(strings.TrimPrefix(auth, bearerPrefix))
-		if provided != m.token {
-			RespondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid bearer token")
+		if key != m.token {
+			RespondError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid admin key")
 			return
 		}
 

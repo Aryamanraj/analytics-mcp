@@ -41,7 +41,7 @@ func TestMiddlewareWrongToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer nope")
+	req.Header.Set(adminKeyHeader, "nope")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -66,7 +66,7 @@ func TestMiddlewareAllowsLocalhost(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
 	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set(adminKeyHeader, "secret")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -91,7 +91,7 @@ func TestMiddlewareAllowsCIDR(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
 	req.RemoteAddr = "10.1.2.3:2358"
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set(adminKeyHeader, "secret")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -116,7 +116,7 @@ func TestMiddlewareBlocksIP(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/version", nil)
 	req.RemoteAddr = "8.8.8.8:3333"
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set(adminKeyHeader, "secret")
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
