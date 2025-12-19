@@ -7,12 +7,14 @@ BIN_DIR ?= bin
 PKG := ./...
 
 # Binaries
-BIN_APP  ?= payram-analytics         # combined MCP + Chat API
-BIN_MCP  ?= payram-analytics-mcp     # MCP HTTP only
-BIN_CHAT ?= payram-analytics-chat    # Chat API only
+BIN_APP    ?= payram-analytics         # combined MCP + Chat API
+BIN_MCP    ?= payram-analytics-mcp     # MCP HTTP only
+BIN_CHAT   ?= payram-analytics-chat    # Chat API only
+BIN_AGENT  ?= payram-analytics-agent   # Supervisor/agent entrypoint
+AGENT_HOME ?= $(PWD)/.agent-home
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
-MCP_SERVER_URL ?= http://localhost:8080/
-CHAT_API_PORT ?= 4000
+MCP_SERVER_URL ?= http://localhost:3333/
+CHAT_API_PORT ?= 2358
 OPENAI_MODEL ?= gpt-4o-mini
 
 .PHONY: help
@@ -26,12 +28,14 @@ help:
 	@echo "  make test                 Run go test ./..."
 	@echo "  make cover                Run tests with coverage report"
 	@echo "  make build-app            Build combined app -> $(BIN_DIR)/$(BIN_APP)"
-	@echo "  make build-mcp            Build MCP-only binary -> $(BIN_DIR)/$(BIN_MCP)"
+	@echo "  make build-mcp            Build mcp-server binary -> $(BIN_DIR)/$(BIN_MCP)"
 	@echo "  make build-chat           Build Chat API binary -> $(BIN_DIR)/$(BIN_CHAT)"
-	@echo "  make build-all            Build app, MCP-only, and Chat API"
-	@echo "  make run-app              Run combined app (MCP 8080 + Chat API 4000)"
-	@echo "  make run-mcp              Run MCP-only server on :8080"
-	@echo "  make run-chat             Run Chat API on :4000 (requires OPENAI_API_KEY)"
+	@echo "  make build-agent          Build supervisor agent -> $(BIN_DIR)/$(BIN_AGENT)"
+	@echo "  make build-all            Build app, mcp-server, Chat API, and agent"
+	@echo "  make run-app              Run combined app (MCP 3333 + Chat API 2358)"
+	@echo "  make run-mcp              Run mcp-server server on :3333"
+	@echo "  make run-chat             Run Chat API on :2358 (requires OPENAI_API_KEY)"
+	@echo "  make run-agent            Run supervisor agent on :9900 (PAYRAM_AGENT_HOME=$(AGENT_HOME))"
 	@echo "  make precommit            fmt-check + vet + test + build-all"
 	@echo "  make commit               Guide an interactive conventional commit"
 	@echo "  make clean                Remove build artifacts and coverage files"
@@ -73,15 +77,20 @@ build-app:
 .PHONY: build-mcp
 build-mcp:
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -o $(BIN_DIR)/$(BIN_MCP) cmd/mcp-only/main.go
+	$(GO) build -o $(BIN_DIR)/$(BIN_MCP) cmd/mcp-server/main.go
 
 .PHONY: build-chat
 build-chat:
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/$(BIN_CHAT) cmd/chat-api/main.go
 
+.PHONY: build-agent
+build-agent:
+	@mkdir -p $(BIN_DIR)
+	$(GO) build -o $(BIN_DIR)/$(BIN_AGENT) cmd/agent/main.go
+
 .PHONY: build-all
-build-all: build-app build-mcp build-chat
+build-all: build-app build-mcp build-chat build-agent
 
 .PHONY: run-app
 run-app:
@@ -89,11 +98,19 @@ run-app:
 
 .PHONY: run-mcp
 run-mcp:
-	$(GO) run cmd/mcp-only/main.go --http :8080
+	$(GO) run cmd/mcp-server/main.go --http :3333
 
 .PHONY: run-chat
 run-chat:
 	$(GO) run ./cmd/chat-api --port $(CHAT_API_PORT) --mcp $(MCP_SERVER_URL) --openai-model $(OPENAI_MODEL)
+
+.PHONY: run-agent
+run-agent: build-mcp build-chat
+	@mkdir -p $(AGENT_HOME)
+	PAYRAM_AGENT_HOME=$(AGENT_HOME) \
+	PAYRAM_AGENT_SEED_CHAT_SRC=$(BIN_DIR)/$(BIN_CHAT) \
+	PAYRAM_AGENT_SEED_MCP_SRC=$(BIN_DIR)/$(BIN_MCP) \
+	$(GO) run ./cmd/agent
 
 .PHONY: precommit
 precommit:

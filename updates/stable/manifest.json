@@ -1,0 +1,13 @@
+{
+  "name": "payram-analytics",
+  "channel": "stable",
+  "version": "0.0.0",
+  "released_at": "1970-01-01T00:00:00Z",
+  "notes": "bootstrap",
+  "artifacts": {
+    "chat": {"url": "", "sha256": ""},
+    "mcp": {"url": "", "sha256": ""}
+  },
+  "compatibility": {"payram_core": {"min": "", "max": ""}},
+  "revoked": false
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/payram/payram-analytics-mcp-server/internal/chatapi"
 	"github.com/payram/payram-analytics-mcp-server/internal/logging"
+	"github.com/payram/payram-analytics-mcp-server/internal/version"
 	"github.com/sirupsen/logrus"
 )
 
@@ -20,12 +22,12 @@ func main() {
 	}
 	defer cleanup()
 
-	port := envOr("CHAT_API_PORT", "4000")
+	port := envOr("CHAT_API_PORT", "2358")
 	apiKey := envOr("CHAT_API_KEY", "")
 	openaiKey := envOr("OPENAI_API_KEY", "")
 	openaiModel := envOr("OPENAI_MODEL", "gpt-4o-mini")
 	openaiBase := envOr("OPENAI_BASE_URL", "https://api.openai.com/v1")
-	mcpURL := envOr("MCP_SERVER_URL", "http://localhost:8080/")
+	mcpURL := envOr("MCP_SERVER_URL", "http://localhost:3333/")
 
 	flag.StringVar(&port, "port", port, "port to listen on")
 	flag.StringVar(&apiKey, "api-key", apiKey, "chat API bearer key")
@@ -42,6 +44,10 @@ func main() {
 	h := chatapi.NewHandler(logger, apiKey, openaiKey, openaiModel, openaiBase, mcpURL)
 	mux := http.NewServeMux()
 	h.Register(mux)
+	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(version.Get())
+	})
 
 	handler := logRequests(logger, mux)
 

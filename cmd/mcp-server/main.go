@@ -11,10 +11,10 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	httpAddr := flag.String("http", ":8080", "MCP HTTP listen address (e.g., :8080)")
+	httpAddr := flag.String("http", ":3333", "MCP HTTP listen address (e.g., :3333)")
 	flag.Parse()
 
-	log.Printf("MCP-only server listening on %s", *httpAddr)
+	log.Printf("mcp-server server listening on %s", *httpAddr)
 	if err := app.RunMCPHTTP(*httpAddr); err != nil {
 		log.Fatalf("MCP server error: %v", err)
 	}

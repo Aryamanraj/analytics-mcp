@@ -19,8 +19,8 @@ func main() {
 	_ = godotenv.Load()
 
 	// Flags / env
-	mcpAddr := flag.String("mcp-http", envOr("MCP_HTTP_ADDR", ":8080"), "MCP HTTP listen address (e.g., :8080)")
-	chatPort := flag.String("chat-port", envOr("CHAT_API_PORT", "4000"), "Chat API port")
+	mcpAddr := flag.String("mcp-http", envOr("MCP_HTTP_ADDR", ":3333"), "MCP HTTP listen address (e.g., :3333)")
+	chatPort := flag.String("chat-port", envOr("CHAT_API_PORT", "2358"), "Chat API port")
 	chatAPIKey := flag.String("chat-api-key", envOr("CHAT_API_KEY", ""), "Chat API bearer key")
 	openaiKey := flag.String("openai-key", envOr("OPENAI_API_KEY", ""), "OpenAI API key")
 	openaiModel := flag.String("openai-model", envOr("OPENAI_MODEL", "gpt-4o-mini"), "OpenAI model")
