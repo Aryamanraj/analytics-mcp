@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/secrets"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/supervisor"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 	"github.com/payram/payram-analytics-mcp-server/internal/version"
@@ -45,6 +46,8 @@ func NewMux(sup Supervisor) http.Handler {
 	mux.Handle("/admin/child/restart", adminGuard(http.HandlerFunc(restartHandler(sup))))
 	mux.Handle("/admin/child/status", adminGuard(http.HandlerFunc(statusHandler(sup))))
 	mux.Handle("/admin/logs", adminGuard(http.HandlerFunc(logsHandler(sup))))
+	mux.Handle("/admin/secrets/openai", adminGuard(http.HandlerFunc(secretsHandler)))
+	mux.Handle("/admin/secrets/status", adminGuard(http.HandlerFunc(secretsStatusHandler)))
 
 	return mux
 }
@@ -594,6 +597,55 @@ func logsHandler(sup Supervisor) func(http.ResponseWriter, *http.Request) {
 			"lines":     logs,
 		})
 	}
+}
+
+func secretsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPut:
+		var req struct {
+			OpenAIAPIKey string `json:"openai_api_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			RespondError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+			return
+		}
+		if strings.TrimSpace(req.OpenAIAPIKey) == "" {
+			RespondError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "openai_api_key is required")
+			return
+		}
+		if err := secrets.PutOpenAIKey(update.HomeDir(), req.OpenAIAPIKey); err != nil {
+			RespondError(w, http.StatusInternalServerError, "SECRET_SAVE_FAILED", err.Error())
+			return
+		}
+		RespondOK(w, http.StatusOK, map[string]any{"ok": true})
+	case http.MethodDelete:
+		if err := secrets.DeleteOpenAIKey(update.HomeDir()); err != nil {
+			RespondError(w, http.StatusInternalServerError, "SECRET_DELETE_FAILED", err.Error())
+			return
+		}
+		RespondOK(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only PUT and DELETE allowed")
+	}
+}
+
+func secretsStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		RespondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "only GET allowed")
+		return
+	}
+
+	_, source, err := secrets.Load(update.HomeDir())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "SECRET_LOAD_FAILED", err.Error())
+		return
+	}
+
+	set := source == "env" || source == "state"
+	RespondOK(w, http.StatusOK, map[string]any{
+		"openai_api_key_set": set,
+		"source":             source,
+	})
 }
 
 type childVersionResult struct {

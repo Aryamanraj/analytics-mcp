@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/secrets"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 )
 
@@ -352,17 +353,35 @@ func (c *child) childEnv() []string {
 	case "mcp":
 		base = ensureEnv(base, "PAYRAM_MCP_PORT", "3333")
 	}
+	base = ensureOpenAIKey(base)
 	return base
 }
 
 func ensureEnv(env []string, key, def string) []string {
-	for i, kv := range env {
-		if strings.HasPrefix(kv, key+"=") {
-			return env
-		}
-		_ = i
+	if hasEnv(env, key) {
+		return env
 	}
 	return append(env, fmt.Sprintf("%s=%s", key, def))
+}
+
+func ensureOpenAIKey(env []string) []string {
+	if hasEnv(env, "OPENAI_API_KEY") {
+		return env
+	}
+	sec, _, err := secrets.Load(update.HomeDir())
+	if err != nil || sec.OpenAIAPIKey == "" {
+		return env
+	}
+	return append(env, "OPENAI_API_KEY="+sec.OpenAIAPIKey)
+}
+
+func hasEnv(env []string, key string) bool {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, key+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *child) sleep(ctx context.Context, d time.Duration) bool {
