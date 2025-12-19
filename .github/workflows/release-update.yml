@@ -99,10 +99,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          OUT_DIR="updates/${{ steps.meta.outputs.channel }}"
+          TMP_DIR=$(mktemp -d)
+          cp "$OUT_DIR/manifest.json" "$TMP_DIR/"
+          cp "$OUT_DIR/manifest.json.sig" "$TMP_DIR/"
+
           git fetch origin "$DEFAULT_BRANCH":"$DEFAULT_BRANCH"
           git checkout "$DEFAULT_BRANCH"
           git pull origin "$DEFAULT_BRANCH"
-          git add updates/${{ steps.meta.outputs.channel }}/manifest.json updates/${{ steps.meta.outputs.channel }}/manifest.json.sig
+
+          mkdir -p "$OUT_DIR"
+          cp "$TMP_DIR/manifest.json" "$OUT_DIR/"
+          cp "$TMP_DIR/manifest.json.sig" "$OUT_DIR/"
+
+          git add "$OUT_DIR/manifest.json" "$OUT_DIR/manifest.json.sig"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: update ${{ steps.meta.outputs.channel }} manifest for ${{ steps.meta.outputs.tag }}" || echo "No manifest changes to commit"
