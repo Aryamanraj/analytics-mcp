@@ -11,6 +11,7 @@ BIN_APP    ?= payram-analytics         # combined MCP + Chat API
 BIN_MCP    ?= payram-analytics-mcp     # MCP HTTP only
 BIN_CHAT   ?= payram-analytics-chat    # Chat API only
 BIN_AGENT  ?= payram-analytics-agent   # Supervisor/agent entrypoint
+AGENT_HOME ?= $(PWD)/.agent-home
 GOFILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 MCP_SERVER_URL ?= http://localhost:3333/
 CHAT_API_PORT ?= 2358
@@ -34,7 +35,7 @@ help:
 	@echo "  make run-app              Run combined app (MCP 3333 + Chat API 2358)"
 	@echo "  make run-mcp              Run mcp-server server on :3333"
 	@echo "  make run-chat             Run Chat API on :2358 (requires OPENAI_API_KEY)"
-	@echo "  make run-agent            Run supervisor agent on :9900"
+	@echo "  make run-agent            Run supervisor agent on :9900 (PAYRAM_AGENT_HOME=$(AGENT_HOME))"
 	@echo "  make precommit            fmt-check + vet + test + build-all"
 	@echo "  make commit               Guide an interactive conventional commit"
 	@echo "  make clean                Remove build artifacts and coverage files"
@@ -104,7 +105,11 @@ run-chat:
 	$(GO) run ./cmd/chat-api --port $(CHAT_API_PORT) --mcp $(MCP_SERVER_URL) --openai-model $(OPENAI_MODEL)
 
 .PHONY: run-agent
-run-agent:
+run-agent: build-mcp build-chat
+	@mkdir -p $(AGENT_HOME)
+	PAYRAM_AGENT_HOME=$(AGENT_HOME) \
+	PAYRAM_AGENT_SEED_CHAT_SRC=$(BIN_DIR)/$(BIN_CHAT) \
+	PAYRAM_AGENT_SEED_MCP_SRC=$(BIN_DIR)/$(BIN_MCP) \
 	$(GO) run ./cmd/agent
 
 .PHONY: precommit
