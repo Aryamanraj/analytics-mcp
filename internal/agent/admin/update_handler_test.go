@@ -20,6 +20,8 @@ func TestUpdateAvailableSuccess(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 
+	home := t.TempDir()
+
 	manifest := update.Manifest{
 		Name:          "payram-analytics",
 		Channel:       "stable",
@@ -53,6 +55,7 @@ func TestUpdateAvailableSuccess(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
+	t.Setenv("PAYRAM_AGENT_HOME", home)
 	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
 	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
 	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)
@@ -98,11 +101,76 @@ func TestUpdateAvailableSuccess(t *testing.T) {
 	}
 }
 
+func TestUpdateAvailableAlreadyCurrent(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+
+	home := t.TempDir()
+
+	manifest := update.Manifest{Version: "2.0.0"}
+	raw, _ := json.Marshal(manifest)
+	sig := ed25519.Sign(priv, raw)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stable/manifest.json", func(w http.ResponseWriter, _ *http.Request) { w.Write(raw) })
+	mux.HandleFunc("/stable/manifest.json.sig", func(w http.ResponseWriter, _ *http.Request) { w.Write(sig) })
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"version":"1.12.3"}`))
+	}))
+	defer core.Close()
+
+	t.Setenv("PAYRAM_AGENT_HOME", home)
+	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
+	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
+	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)
+	t.Setenv("PAYRAM_AGENT_UPDATE_PUBKEY_B64", base64.StdEncoding.EncodeToString(pub))
+	t.Setenv("PAYRAM_CORE_URL", core.URL)
+
+	if err := update.SaveStatus(update.UpdateStatus{CurrentVersion: manifest.Version}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+
+	sup := &supervisor.Supervisor{}
+	handler := NewMux(sup)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/update/available", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set(adminKeyHeader, "tok")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	data := body["data"].(map[string]any)
+	if avail, _ := data["available"].(bool); avail {
+		t.Fatalf("expected available false when already current")
+	}
+	if cv := data["current_version"]; cv != manifest.Version {
+		t.Fatalf("unexpected current_version: %v", cv)
+	}
+}
+
 func TestUpdateAvailableSignatureInvalid(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
+
+	home := t.TempDir()
 
 	manifest := update.Manifest{Version: "1.0.0"}
 	raw, _ := json.Marshal(manifest)
@@ -122,6 +190,7 @@ func TestUpdateAvailableSignatureInvalid(t *testing.T) {
 
 	wrongPub, _, _ := ed25519.GenerateKey(rand.Reader)
 
+	t.Setenv("PAYRAM_AGENT_HOME", home)
 	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
 	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
 	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)
@@ -161,6 +230,8 @@ func TestUpdateAvailableCoreIncompatible(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 
+	home := t.TempDir()
+
 	manifest := update.Manifest{
 		Version:       "1.0.0",
 		Compatibility: update.Compatibility{PayramCore: update.Range{Min: "1.12.0", Max: "1.13.x"}},
@@ -181,6 +252,7 @@ func TestUpdateAvailableCoreIncompatible(t *testing.T) {
 	}))
 	defer core.Close()
 
+	t.Setenv("PAYRAM_AGENT_HOME", home)
 	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
 	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
 	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)
@@ -218,6 +290,8 @@ func TestUpdateAvailableCoreUnreachable(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 
+	home := t.TempDir()
+
 	manifest := update.Manifest{Version: "1.0.0"}
 	raw, _ := json.Marshal(manifest)
 	sig := ed25519.Sign(priv, raw)
@@ -232,6 +306,7 @@ func TestUpdateAvailableCoreUnreachable(t *testing.T) {
 	deadCore := httptest.NewServer(http.NewServeMux())
 	deadCore.Close()
 
+	t.Setenv("PAYRAM_AGENT_HOME", home)
 	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
 	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
 	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)
@@ -268,6 +343,8 @@ func TestUpdateAvailableIgnoreCompatNoCoreURL(t *testing.T) {
 		t.Fatalf("keygen: %v", err)
 	}
 
+	home := t.TempDir()
+
 	manifest := update.Manifest{Version: "1.0.0"}
 	raw, _ := json.Marshal(manifest)
 	sig := ed25519.Sign(priv, raw)
@@ -279,6 +356,7 @@ func TestUpdateAvailableIgnoreCompatNoCoreURL(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
+	t.Setenv("PAYRAM_AGENT_HOME", home)
 	t.Setenv("PAYRAM_AGENT_ADMIN_TOKEN", "tok")
 	t.Setenv("PAYRAM_AGENT_ADMIN_ALLOWLIST", "")
 	t.Setenv("PAYRAM_AGENT_UPDATE_BASE_URL", srv.URL)

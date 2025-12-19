@@ -117,6 +117,14 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	status, err := update.LoadStatus()
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, "STATUS_LOAD_FAILED", err.Error())
+		return
+	}
+
+	available := manifest.Version != "" && manifest.Version != status.CurrentVersion && !manifest.Revoked
+
 	compatRange := manifest.Compatibility.PayramCore
 	coreInfo := map[string]any{
 		"min": compatRange.Min,
@@ -139,12 +147,13 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 			coreInfo["reason"] = compatResult["reason"]
 			coreInfo["ignored"] = ignoreCompat
 			RespondOK(w, http.StatusOK, map[string]any{
-				"available":      true,
-				"target_version": manifest.Version,
-				"notes":          manifest.Notes,
-				"revoked":        manifest.Revoked,
-				"payram_core":    coreInfo,
-				"compat":         compatResult,
+				"available":       available,
+				"current_version": status.CurrentVersion,
+				"target_version":  manifest.Version,
+				"notes":           manifest.Notes,
+				"revoked":         manifest.Revoked,
+				"payram_core":     coreInfo,
+				"compat":          compatResult,
 			})
 			return
 		}
@@ -163,12 +172,13 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 			coreInfo["reason"] = compatResult["reason"]
 			coreInfo["ignored"] = ignoreCompat
 			RespondOK(w, http.StatusOK, map[string]any{
-				"available":      true,
-				"target_version": manifest.Version,
-				"notes":          manifest.Notes,
-				"revoked":        manifest.Revoked,
-				"payram_core":    coreInfo,
-				"compat":         compatResult,
+				"available":       available,
+				"current_version": status.CurrentVersion,
+				"target_version":  manifest.Version,
+				"notes":           manifest.Notes,
+				"revoked":         manifest.Revoked,
+				"payram_core":     coreInfo,
+				"compat":          compatResult,
 			})
 			return
 		}
@@ -193,23 +203,25 @@ func updateAvailableHandler(w http.ResponseWriter, r *http.Request) {
 	if !ignoreCompat && !compatible {
 		compatResult["compatible"] = false
 		RespondOK(w, http.StatusOK, map[string]any{
-			"available":      true,
-			"target_version": manifest.Version,
-			"notes":          manifest.Notes,
-			"revoked":        manifest.Revoked,
-			"payram_core":    coreInfo,
-			"compat":         compatResult,
+			"available":       available,
+			"current_version": status.CurrentVersion,
+			"target_version":  manifest.Version,
+			"notes":           manifest.Notes,
+			"revoked":         manifest.Revoked,
+			"payram_core":     coreInfo,
+			"compat":          compatResult,
 		})
 		return
 	}
 
 	RespondOK(w, http.StatusOK, map[string]any{
-		"available":      true,
-		"target_version": manifest.Version,
-		"notes":          manifest.Notes,
-		"revoked":        manifest.Revoked,
-		"payram_core":    coreInfo,
-		"compat":         compatResult,
+		"available":       available,
+		"current_version": status.CurrentVersion,
+		"target_version":  manifest.Version,
+		"notes":           manifest.Notes,
+		"revoked":         manifest.Revoked,
+		"payram_core":     coreInfo,
+		"compat":          compatResult,
 	})
 }
 

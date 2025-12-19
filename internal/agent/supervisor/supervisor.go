@@ -365,20 +365,40 @@ func ensureEnv(env []string, key, def string) []string {
 }
 
 func ensureOpenAIKey(env []string) []string {
-	if hasEnv(env, "OPENAI_API_KEY") {
+	const prefix = "OPENAI_API_KEY="
+	if hasEnvWithValue(env, "OPENAI_API_KEY") {
 		return env
 	}
+
 	sec, _, err := secrets.Load(update.HomeDir())
 	if err != nil || sec.OpenAIAPIKey == "" {
 		return env
 	}
-	return append(env, "OPENAI_API_KEY="+sec.OpenAIAPIKey)
+
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			env[i] = prefix + sec.OpenAIAPIKey
+			return env
+		}
+	}
+
+	return append(env, prefix+sec.OpenAIAPIKey)
 }
 
 func hasEnv(env []string, key string) bool {
 	for _, kv := range env {
 		if strings.HasPrefix(kv, key+"=") {
 			return true
+		}
+	}
+	return false
+}
+
+func hasEnvWithValue(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return len(kv) > len(prefix)
 		}
 	}
 	return false

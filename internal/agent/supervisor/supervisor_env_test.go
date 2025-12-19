@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/payram/payram-analytics-mcp-server/internal/agent/secrets"
 	"github.com/payram/payram-analytics-mcp-server/internal/agent/update"
 )
 
@@ -48,5 +49,22 @@ func TestNewFromEnvMissingDefaultFails(t *testing.T) {
 
 	if _, err := NewFromEnv(); err == nil {
 		t.Fatalf("expected error for missing binaries")
+	}
+}
+
+func TestEnsureOpenAIKeyOverridesEmptyEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PAYRAM_AGENT_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "state"), 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := secrets.PutOpenAIKey(home, "sk-test-key"); err != nil {
+		t.Fatalf("put key: %v", err)
+	}
+
+	input := []string{"OPENAI_API_KEY="}
+	out := ensureOpenAIKey(input)
+	if !hasEnvWithValue(out, "OPENAI_API_KEY") {
+		t.Fatalf("expected OPENAI_API_KEY with value from secrets, got %v", out)
 	}
 }
