@@ -2,16 +2,16 @@
   "name": "payram-analytics",
   "channel": "stable",
   "version": "0.0.1",
-  "released_at": "2025-12-19T10:13:08Z",
+  "released_at": "2025-12-19T10:45:44Z",
   "notes": "Release v0.0.1",
   "artifacts": {
     "chat": {
       "url": "https://github.com/PayRam/analytics-mcp-server/releases/download/v0.0.1/chat.bin",
-      "sha256": "726b87c5da1143ba0a2530db78a5a6b090141c949450f1d51180d1f0f6ee2747"
+      "sha256": "077f9be1c52cd0f0dcce0dcc91a1c914fe643fca59d403bb6fc261c0f9120b02"
     },
     "mcp": {
       "url": "https://github.com/PayRam/analytics-mcp-server/releases/download/v0.0.1/mcp.bin",
-      "sha256": "d27d84a72153706cb906b0fe552ced2bcd99bbdd563af84883ebb24aed4f3f86"
+      "sha256": "be4d5dccfb2300f4666c1d266ca58a73d9d9b7ca6a778bb6ed6ddc5c2873d33c"
     }
   },
   "compatibility": {
